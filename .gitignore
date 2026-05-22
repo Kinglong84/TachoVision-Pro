@@ -1,0 +1,58 @@
+# ── File dati personali (GDPR) ─────────────────────────────────────────────────
+# File tachigrafo reali: contengono dati personali sensibili del conducente.
+# NON includere mai nel repository.
+*.DDD
+*.ddd
+*.csv
+
+# ── Credenziali e token cloud ──────────────────────────────────────────────────
+*_token.json
+gdrive_token.json
+onedrive_token.json
+dropbox_token.json
+gdrive_credentials.json
+
+# ── Configurazione locale ──────────────────────────────────────────────────────
+settings.local.json
+*.local.json
+.env
+.env.*
+
+# ── Cartella configurazione utente (generata a runtime) ───────────────────────
+TachoVision/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+.eggs/
+
+# ── Ambienti virtuali ─────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+
+# ── File di sviluppo / debug (non utili agli utenti finali) ───────────────────
+screenshots/
+ui_dumps/
+
+# ── IDE e OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Log ───────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
