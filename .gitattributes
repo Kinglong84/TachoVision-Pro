@@ -1,0 +1,10 @@
+# Normalizza i fine riga: LF nel repo, conversione automatica su Windows
+* text=auto eol=lf
+
+# File binari: nessuna conversione
+*.DDD binary
+*.ddd binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.ico binary
