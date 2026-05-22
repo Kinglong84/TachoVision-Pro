@@ -1,0 +1,76 @@
+# ── File dati personali (GDPR) ─────────────────────────────────────────────────
+# File tachigrafo reali: contengono dati personali sensibili del conducente.
+# NON includere mai nel repository.
+*.DDD
+*.ddd
+*.csv
+
+# ── Credenziali e token cloud ──────────────────────────────────────────────────
+*_token.json
+gdrive_token.json
+onedrive_token.json
+dropbox_token.json
+gdrive_credentials.json
+
+# ── Configurazione locale ──────────────────────────────────────────────────────
+settings.local.json
+*.local.json
+.env
+.env.*
+
+# ── Cartella configurazione utente (generata a runtime) ───────────────────────
+TachoVision/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+.eggs/
+
+# ── Ambienti virtuali ─────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+
+# ── File di sviluppo / debug (non utili agli utenti finali) ───────────────────
+# Materiale usato durante lo sviluppo: confronto parser, dump ADB, APK estratto
+App driver/
+tachoparser-main/
+screenshots/
+ui_dumps/
+app_map.md
+confronto_ui.md
+CLAUDE.md
+compare_csv_ddd.py
+compare_tachoparser.py
+debug_aci.py
+test_parser.py
+tachoparser_masotti_new.json
+tachoparser_masotti_old.json
+tachoparser_portero.json
+
+# ── Output JSON di comparazione (contengono dati personali) ───────────────────
+tachoparser_*.json
+
+# ── IDE e OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Log ───────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Claudeai (file interni dell'assistente AI) ────────────────────────────────
+.claude/

@@ -1,0 +1,14 @@
+# TachoVision Pro — dipendenze
+# Installazione: pip install -r requirements.txt
+
+dash>=2.17.0
+dash-bootstrap-components>=1.6.0
+plotly>=5.22.0
+pandas>=2.0.0
+reportlab>=4.0.0
+
+# Cloud storage (opzionale)
+google-api-python-client>=2.0.0
+google-auth-oauthlib>=1.0.0
+msal>=1.0.0
+dropbox>=12.0.0
