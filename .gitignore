@@ -49,6 +49,7 @@ ui_dumps/
 app_map.md
 confronto_ui.md
 CLAUDE.md
+AI_NOTES.md
 compare_csv_ddd.py
 compare_tachoparser.py
 debug_aci.py
@@ -72,5 +73,7 @@ desktop.ini
 *.log
 logs/
 
-# ── Claudeai (file interni dell'assistente AI) ────────────────────────────────
+# ── File interni strumenti di sviluppo ───────────────────────────────────────
 .claude/
+.cursor/
+.aider/
