@@ -54,8 +54,21 @@ pip install -r requirements.txt
 
 ### Lettore smartcard USB (opzionale)
 
-Per leggere la carta direttamente dal lettore fisico USB è necessario **pyscard**,
-che su Windows richiede i **Microsoft C++ Build Tools**.
+Per leggere la carta direttamente dal lettore fisico USB è necessario **pyscard**.
+
+#### Python 3.10 – 3.13 (Windows, macOS) — installazione diretta ✅
+
+pyscard distribuisce wheel pre-compilati su PyPI per Python 3.10, 3.11, 3.12 e 3.13.
+**Nessun compilatore necessario**, basta:
+
+```bash
+pip install pyscard
+```
+
+#### Python 3.9 o 3.14+ su Windows — Build Tools richiesti ⚠️
+
+Per Python 3.9 su Windows e per Python 3.14 o superiore (wheel non ancora disponibili),
+è necessario installare prima i **Microsoft C++ Build Tools**:
 
 1. Scarica da: [visualstudio.microsoft.com/visual-cpp-build-tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
 2. Installa il workload **"Sviluppo di applicazioni desktop con C++"**
@@ -64,7 +77,22 @@ che su Windows richiede i **Microsoft C++ Build Tools**.
    pip install pyscard
    ```
 
-> Senza pyscard l'applicazione funziona normalmente caricando file `.DDD` dal disco.
+#### Linux — pacchetti di sistema richiesti
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install swig libpcsclite-dev
+pip install pyscard
+
+# Fedora / RHEL
+sudo dnf install pcsc-lite-devel swig
+pip install pyscard
+```
+
+> Senza pyscard l'applicazione funziona normalmente caricando file `.DDD` dal disco.  
+> Gli script di installazione Windows (`installa_windows.bat` / `.ps1`) gestiscono  
+> automaticamente entrambi i casi: provano prima il wheel, poi mostrano le istruzioni  
+> Build Tools solo se necessario.
 
 ---
 
