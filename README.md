@@ -16,6 +16,10 @@ senza account, senza abbonamento.
 
 ---
 
+![Screenshot TachoVision Pro](docs/screenshot.png)
+
+---
+
 ## Funzionalità
 
 | Tab | Cosa mostra |
