@@ -1,7 +1,14 @@
 # TachoVision Pro
 
+![Beta](https://img.shields.io/badge/versione-beta-orange)
+![Python](https://img.shields.io/badge/python-3.10--3.13-blue)
+![License](https://img.shields.io/badge/licenza-uso%20personale-lightgrey)
+
 Applicazione web locale per analizzare le **carte tachigrafo digitali** (file `.DDD`).  
 Supporta la lettura da lettore USB smartcard e il caricamento diretto del file.
+
+> ⚠️ **Versione Beta** — Prima release pubblica. Il software è funzionante ma potrebbero
+> essere presenti bug. Per segnalazioni apri una [Issue](../../issues) su GitHub.
 
 ---
 
