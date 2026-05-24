@@ -5,7 +5,11 @@
 ![License](https://img.shields.io/badge/licenza-uso%20personale-lightgrey)
 
 Applicazione web locale per analizzare le **carte tachigrafo digitali** (file `.DDD`).  
-Supporta la lettura da lettore USB smartcard e il caricamento diretto del file.
+Supporta la lettura diretta da **lettore USB smartcard** e il caricamento manuale del file.
+
+Legge file `.DDD` di **prima e seconda generazione** (Gen1 / Gen2), rileva automaticamente
+le **infrazioni al Reg. CE 561/2006** e genera report PDF — tutto in locale, senza cloud,
+senza account, senza abbonamento.
 
 > ⚠️ **Versione Beta** — Prima release pubblica. Il software è funzionante ma potrebbero
 > essere presenti bug. Per segnalazioni apri una [Issue](../../issues) su GitHub.
@@ -274,3 +278,12 @@ I file `.DDD` contengono **dati personali sensibili** del conducente (identità,
 
 Distribuito per uso personale e professionale nel rispetto delle normative sul trattamento
 dei dati tachigrafo (Reg. CE 561/2006, Dir. 2006/22/CE, Reg. UE 2016/679).
+
+---
+
+## Parole chiave
+
+tachigrafo digitale · carta conducente · file DDD · lettore tachigrafo · analisi tachigrafo ·
+digital tachograph · tachograph card reader · DDD file viewer · driver card analyzer ·
+scarico carta tachigrafo · infrazioni tachigrafo · Reg. 561/2006 · orario conducenti ·
+tempi guida e riposo · tachograph analysis software · open source tachograph
