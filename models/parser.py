@@ -437,13 +437,16 @@ def _decode_activities_gen1(data: bytes) -> List[DayActivity]:
     STRUTTURA DEL BUFFER CIRCOLARE:
       I 4 byte iniziali sono il "direttorio" del buffer:
         [oldest:2] → offset del record più vecchio nel buffer
-        [newest:2] → offset dove verranno scritti i prossimi dati
+        [newest:2] → offset dell'INIZIO del record più recente (il giorno corrente)
       Poi vengono i dati veri: un array di record giornalieri in ordine ciclico.
 
       "Circolare" significa che quando si riempie, sovrascrive dall'inizio.
-      I pointer oldest/newest indicano dove si trova il "bordo" della sovrascrittura.
-      Per linearizzare: se newest >= oldest, i dati sono contigui (no wrap-around);
-      altrimenti sono spezzati e vanno concatenati: buf[oldest:] + buf[:newest].
+      Per linearizzare: si legge da oldest fino alla FINE del record newest
+      (newest + sua lunghezza), riavvolgendo a inizio buffer se necessario.
+
+    FIX issue GitHub #1: newest era usato come fine dei dati, quindi il record
+    più recente (il giorno dello scarico) veniva sempre escluso e compariva
+    solo scaricando la carta il giorno dopo.
 
     STRUTTURA RECORD GIORNALIERO:
       [prev:2]      → offset al record precedente (per navigazione backward)
@@ -461,20 +464,20 @@ def _decode_activities_gen1(data: bytes) -> List[DayActivity]:
     buf    = data[4:]    # il buffer vero inizia dopo i 4 byte di direttorio
     bsz    = len(buf)
     oldest = _u16(data, 0)   # puntatore al record più vecchio
-    newest = _u16(data, 2)   # puntatore alla fine dei dati correnti
+    newest = _u16(data, 2)   # puntatore all'inizio del record più recente
 
-    if oldest >= bsz or newest > bsz:
+    if oldest >= bsz or newest >= bsz:
         return []   # puntatori corrotti: file malformato
 
-    # Linearizzazione del buffer circolare:
-    # Se newest >= oldest: i dati sono nel segmento [oldest:newest] (caso normale).
-    # Se newest < oldest: il buffer ha "wrappato" — i dati sono in due segmenti:
-    #   buf[oldest:] (fine del buffer) + buf[:newest] (inizio del buffer).
-    # newest == oldest e newest == 0: buffer pieno, prendi tutto.
-    if newest >= oldest:
-        linear = buf[oldest:newest] if newest > oldest else buf
-    else:
-        linear = buf[oldest:] + buf[:newest]
+    # Linearizzazione del buffer circolare: da oldest fino alla fine del record
+    # newest. Il buffer raddoppiato gestisce i dati (e l'header del record
+    # newest) che attraversano la fine del buffer.
+    ring = buf + buf
+    newest_len = _u16(ring, newest + 2)   # lunghezza del record più recente
+    if not 12 <= newest_len <= 2892:
+        newest_len = 0   # header non valido: ci si ferma all'inizio del record newest
+    span = (newest - oldest) % bsz + newest_len
+    linear = ring[oldest:oldest + min(span, bsz)] if span else buf
 
     records_raw: List[tuple] = []   # (dpc, DayActivity) per il trim DPC finale
     visited: set = set()           # previene duplicati per lo stesso giorno (calendario ISO)
