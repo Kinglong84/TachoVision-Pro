@@ -41,8 +41,8 @@ env/
 .env/
 
 # ── File di sviluppo / debug (non utili agli utenti finali) ───────────────────
-screenshots/
-ui_dumps/
+/screenshots/
+/ui_dumps/
 
 # ── IDE e OS ──────────────────────────────────────────────────────────────────
 .vscode/

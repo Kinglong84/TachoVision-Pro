@@ -115,6 +115,14 @@ def _welcome_screen() -> html.Div:
                     n_clicks=0,
                     style=btn_style(C["accent"]),
                 ),
+                # dati di esempio inventati, per provare il programma senza carta
+                html.Button(
+                    "Prova con dati di esempio",
+                    id="btn-welcome-demo",
+                    n_clicks=0,
+                    style={**btn_style(C["accent"]), "marginTop": "10px",
+                           "background": "transparent"},
+                ),
             ], style={"display": "flex", "flexDirection": "column", "alignItems": "center"}),
         ], style={
             "background": C["surface"],
@@ -214,6 +222,20 @@ def register(app):
         if not n_clicks:
             raise PreventUpdate
         return read_card_to_store()
+
+    # ── Callback 1a-ter: dati di esempio ──────────────────────────────────────────
+    @app.callback(
+        Output("store-data", "data", allow_duplicate=True),
+        Input("btn-welcome-demo", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def load_demo(n_clicks):
+        """Pulsante "Prova con dati di esempio": dati inventati (MARIO ROSSI)."""
+        if not n_clicks:
+            raise PreventUpdate
+        from models.analytics import enrich
+        from models.demo_data import build_demo
+        return enrich(build_demo()).to_dict()
 
     # ── Callback 1a-bis: lettura automatica ──────────────────────────────────────
     @app.callback(

@@ -44,79 +44,9 @@ def make_demo() -> CardData:
                 return cd
             except Exception:
                 pass
-    # Fallback sintetico
-    rng = random.Random(42)
-    base_dt = datetime(2026, 1, 5, tzinfo=timezone.utc)
-
-    driver = DriverInfo(
-        surname="ROSSI", firstname="MARIO",
-        birth_date="01/01/1980", language="it",
-        card_number="I000000000000000",
-        issuing_authority="CCIAA DI ROMA",
-        issuing_nation="IT",
-        issue_date="01/01/2022",
-        validity_begin="01/02/2022",
-        expiry_date="01/02/2027",
-        licence_number="X000000000",
-        licence_authority="AUTORITA' COMPETENTE",
-        generation="G2 (v1)", renewal_index="3",
-        replacement_index="0",
-        last_download="01/01/2026 10:00",
-        prev_download="01/07/2025 10:00",
-        filename="C_20260101_1000_G_ROSSI_I000000000000000.DDD",
-        file_size="67485",
-    )
-
-    activities = []
-    for off in range(28):
-        dt = base_dt + timedelta(days=off)
-        wd = dt.weekday()
-        if wd == 6:
-            ch = [ActivityChange(0, "Riposo")]
-            km = 0.0
-        elif wd == 5:
-            s = rng.randint(300, 360)
-            ch = [ActivityChange(0,"Riposo"), ActivityChange(s,"Guida"),
-                  ActivityChange(s+90,"Lavoro"), ActivityChange(s+150,"Guida"),
-                  ActivityChange(s+240,"Riposo")]
-            km = float(rng.randint(60, 180))
-        else:
-            s = rng.randint(260, 330)
-            ch = [
-                ActivityChange(0, "Riposo"),
-                ActivityChange(s, "Disponibilità"),
-                ActivityChange(s+20, "Guida"),
-                ActivityChange(s+120, "Lavoro"),
-                ActivityChange(s+150, "Guida"),
-                ActivityChange(s+270, "Riposo"),   # pausa 45 min
-                ActivityChange(s+315, "Guida"),
-                ActivityChange(s+435, "Lavoro"),
-                ActivityChange(s+465, "Guida"),
-                ActivityChange(min(s+570, 1380), "Riposo"),
-            ]
-            km = float(rng.randint(200, 550))
-
-        activities.append(DayActivity(
-            date=dt.strftime("%Y-%m-%d"),
-            date_display=dt.strftime("%d/%m/%Y"),
-            distance_km=km,
-            changes=ch,
-        ))
-
-    vehicles = [
-        Vehicle("BA123ZX", "05/01/2026", "28/01/2026"),
-        Vehicle("NA456AB", "10/01/2026", "20/01/2026"),
-    ]
-    places = [
-        Place("05/01/2026 06:00", "2026-01-05", "IT", "Inizio", 120000),
-        Place("08/01/2026 18:30", "2026-01-08", "FR", "Inizio", 121450),
-        Place("10/01/2026 07:00", "2026-01-10", "DE", "Inizio", 122800),
-        Place("15/01/2026 19:00", "2026-01-15", "IT", "Inizio", 124200),
-    ]
-
-    cd = CardData(driver=driver, activities=activities,
-                  vehicles=vehicles, places=places, demo=True)
-    return enrich(cd)
+    # Fallback: dati di esempio inventati (MARIO ROSSI), vedi models/demo_data.py
+    from models.demo_data import build_demo
+    return enrich(build_demo())
 
 
 # ── Upload handler ────────────────────────────────────────────────────────────
