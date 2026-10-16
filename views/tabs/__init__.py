@@ -4,7 +4,7 @@ Router: mappa tab_id → funzione render(CardData) → html component
 """
 from views.tabs import (panoramica, attivita, riepilogo, riposo,
                          infrazioni, veicoli, luoghi, pianificazione,
-                         carta, archivio, condivisione)
+                         carta, archivio, condivisione, impostazioni)
 from models.card_data import CardData
 
 TAB_RENDERERS = {
@@ -19,6 +19,7 @@ TAB_RENDERERS = {
     "carta":          carta.render,
     "archivio":       archivio.render,
     "condivisione":   condivisione.render,
+    "impostazioni":   impostazioni.render,
 }
 
 def render_tab(tab_id: str, cd: CardData, gnss_date: str = None):

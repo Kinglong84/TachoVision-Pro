@@ -198,7 +198,7 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
         """Cella tabella con coordinate lat/lon, oppure "—" se non disponibili."""
         if p.gnss_lat is not None and p.gnss_lon is not None:
             return html.Td(f"{p.gnss_lat:.4f}, {p.gnss_lon:.4f}",
-                           style={"fontFamily": "'DM Mono'", "fontSize": "0.73rem",
+                           style={"fontFamily": "'Overpass'", "fontSize": "0.73rem",
                                   "color": C["muted"], "whiteSpace": "nowrap"})
         return html.Td("—", style={"color": C["muted"], "fontSize": "0.78rem"})
 
@@ -206,7 +206,7 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
         """Cella tabella con codice regione, oppure "—" se non disponibile (region=0)."""
         if p.region and p.region != 0:
             return html.Td(str(p.region),
-                           style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem",
+                           style={"fontFamily": "'Overpass'", "fontSize": "0.78rem",
                                   "textAlign": "center", "color": C["muted"]})
         return html.Td("—", style={"color": C["muted"], "fontSize": "0.78rem", "textAlign": "center"})
 
@@ -222,15 +222,15 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
         p_iso = _place_iso_date(p.datetime)
 
         cells = [
-            html.Td(p.datetime, style={"fontFamily": "'DM Mono'", "fontSize": "0.8rem",
+            html.Td(p.datetime, style={"fontFamily": "'Overpass'", "fontSize": "0.8rem",
                                         "whiteSpace": "nowrap"}),
             # Paese con bandiera emoji (es. "🇮🇹 IT")
             html.Td(f"{FLAG.get(p.country, '🏳')} {p.country}",
-                    style={"fontFamily": "'DM Mono'", "textAlign": "center"}),
+                    style={"fontFamily": "'Overpass'", "textAlign": "center"}),
             html.Td(p.entry_type),   # "Inizio" o "Fine"
             # Odometro in formato italiano con punto separatore migliaia
             html.Td(f"{p.odometer_km:,} km".replace(",", "."),
-                    style={"fontFamily": "'DM Mono'", "textAlign": "right", "fontSize": "0.8rem"}),
+                    style={"fontFamily": "'Overpass'", "textAlign": "right", "fontSize": "0.8rem"}),
             _region_cell(p),
         ]
         if has_gnss_places:
@@ -239,7 +239,7 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
                 gnss_cell = html.Td([
                     html.Span(
                         f"{p.gnss_lat:.4f}, {p.gnss_lon:.4f}",
-                        style={"fontFamily": "'DM Mono'", "fontSize": "0.73rem",
+                        style={"fontFamily": "'Overpass'", "fontSize": "0.73rem",
                                "color": C["muted"], "whiteSpace": "nowrap",
                                "marginRight": "4px"},
                     ),
@@ -290,7 +290,9 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
     overview_row = dbc.Row([chart_col, dbc.Col(soste_section, md=8)], className="g-3")
 
     # Assemblaggio parti (banner opzionale + overview)
-    parts = [no_foreign_banner, overview_row] if no_foreign_banner else [overview_row]
+    # in cima, al posto del vecchio banner
+    from views.countries import countries_section
+    parts = [countries_section(cd), overview_row]
 
     # ── Sezione GNSS (solo se la carta ha waypoint GPS) ──────────────────────────
     if cd.gnss_records:
@@ -328,7 +330,7 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
             "borderRadius": "8px", "padding": "10px 18px", "textAlign": "center",
         }
         label_style = {"color": C["muted"], "fontSize": "0.72rem", "marginBottom": "2px"}
-        value_style = {"color": C["accent"], "fontFamily": "'DM Mono'", "fontSize": "1rem",
+        value_style = {"color": C["accent"], "fontFamily": "'Overpass'", "fontSize": "1rem",
                        "fontWeight": "600"}
 
         stats_row = dbc.Row([
@@ -356,16 +358,16 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
         for g in gr:
             acc_m = f"{g.accuracy_dm / 10:.1f} m" if g.accuracy_dm and g.accuracy_dm < 255 else "—"
             gnss_table_rows.append(html.Tr([
-                html.Td(g.timestamp, style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem",
+                html.Td(g.timestamp, style={"fontFamily": "'Overpass'", "fontSize": "0.78rem",
                                              "whiteSpace": "nowrap"}),
-                html.Td(f"{g.lat:.5f}", style={"fontFamily": "'DM Mono'", "fontSize": "0.75rem",
+                html.Td(f"{g.lat:.5f}", style={"fontFamily": "'Overpass'", "fontSize": "0.75rem",
                                                  "textAlign": "right"}),
-                html.Td(f"{g.lon:.5f}", style={"fontFamily": "'DM Mono'", "fontSize": "0.75rem",
+                html.Td(f"{g.lon:.5f}", style={"fontFamily": "'Overpass'", "fontSize": "0.75rem",
                                                  "textAlign": "right"}),
-                html.Td(acc_m, style={"fontFamily": "'DM Mono'", "fontSize": "0.75rem",
+                html.Td(acc_m, style={"fontFamily": "'Overpass'", "fontSize": "0.75rem",
                                        "textAlign": "right", "color": C["muted"]}),
                 html.Td(f"{g.odometer_km:,} km".replace(",", "."),
-                        style={"fontFamily": "'DM Mono'", "fontSize": "0.75rem",
+                        style={"fontFamily": "'Overpass'", "fontSize": "0.75rem",
                                "textAlign": "right", "color": C["muted"]}),
             ]))
 
@@ -398,7 +400,7 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
                         "background": C["surface"], "border": f"1px solid {C['border']}",
                         "color": C["muted"], "borderRadius": "4px", "padding": "3px 10px",
                         "cursor": "pointer", "fontSize": "0.75rem",
-                        "fontFamily": "'Space Grotesk'", "marginLeft": "auto",
+                        "fontFamily": "'Overpass'", "marginLeft": "auto",
                     },
                 ),
             ], style={

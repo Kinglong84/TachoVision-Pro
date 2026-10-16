@@ -176,13 +176,13 @@ def veh_table(vehicles: list) -> html.Table:
         if has_km:
             # Formato italiano: 1.234 km (punto come separatore migliaia)
             km_str = f"{total_km:,} km".replace(",", ".") if total_km else "—"
-            cells.append(html.Td(km_str, style={"fontFamily": "'DM Mono'",
+            cells.append(html.Td(km_str, style={"fontFamily": "'Overpass'",
                                                   "fontSize": "0.8rem",
                                                   "textAlign": "right"}))
 
         # Colonna VIN (solo Gen2)
         if has_vin:
-            cells.append(html.Td(vin or "—", style={"fontFamily": "'DM Mono'",
+            cells.append(html.Td(vin or "—", style={"fontFamily": "'Overpass'",
                                                       "fontSize": "0.75rem",
                                                       "color": C["muted"]}))
 

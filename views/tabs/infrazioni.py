@@ -1,254 +1,244 @@
 """
 views/tabs/infrazioni.py
 ========================
-Tab "Infrazioni": visualizzazione delle violazioni al Reg. CE 561/2006
-e alla Direttiva 2002/15/CE sul tempo di lavoro degli autotrasportatori.
+Tab "Infrazioni": violazioni al Reg. CE 561/2006 e alla Dir. 2002/15/CE.
 
-Le infrazioni vengono rilevate da models/violations.py e qui presentate:
-  1. Riga di 4 stat-card (conteggio per severità)
-  2. Se nessuna infrazione: messaggio verde "Conforme"
-  3. Se ci sono infrazioni: accordion per categoria normativa
+Schermata:
+  - intestazione "Valido: <data scarico>"
+  - ogni voce: Fallo + gravità, Periodo, Dettagli "misurato (soglia)"
+  - menu: periodo 7 / 28 / 56 giorni / intero periodo (predefinito 56),
+    filtro a stelle per gravità, filtro per tipo (6 gruppi), dettagli on/off
+In più: contatori per gravità e spiegazione normativa di ogni tipo.
 
-Ogni categoria normativa (es. "Guida continua Art. 7") è un pannello
-espandibile (html.Details) con le singole infrazioni in tabella.
-I pannelli con infrazioni gravi/molto gravi sono aperti di default.
-
-Riferimento normativo:
-  Reg. CE 561/2006 → guida e riposo
-  Dir. 2002/15/CE → orario di lavoro totale degli autotrasportatori
+I filtri sono ricordati dal browser (persistence) e applicati dal callback in
+controllers/violations_controller.py, che richiama build_list().
 """
 
-from collections import defaultdict
-from dash import html
-import dash_bootstrap_components as dbc
+from datetime import datetime, timedelta
 
-from views.components import (
-    section, badge, empty_state,
-    filter_bar, filter_blocks_input, filter_count_badge
-)
-from views.theme import C, SEV_COLORS
-from models.violations import detect_violations, violation_summary, SEV_VERY, SEV_HIGH, SEV_LOW
+from dash import dcc, html
+
 from models.card_data import CardData
+from models.violations import GROUPS, MI, MSI, SI, VSI, DESCRIPTIONS, violation_summary
+from views.components import empty_state, section
+from views.export_bar import bar_for
+from views.theme import C
 
-# ID contenitore infrazioni per il filtro JavaScript
-_TABLE_ID = "table-infrazioni"
+WARN_INFO = ("W", 0, "Avvertenza", "#5E666D")
+SEV_INFO = [  # (codice, stelle, etichetta app, colore)
+    (MSI, 4, "Infrazione più grave", "#991B1B"),
+    (VSI, 3, "Infrazione molto grave", "#DC2626"),
+    (SI, 2, "Infrazione grave", "#F97316"),
+    (MI, 1, "Infrazione minore", "#F59E0B"),
+]
 
+PERIOD_OPTIONS = [("7", "Ultimi 7 giorni"), ("28", "Ultimi 28 giorni"),
+                  ("56", "Ultimi 56 giorni"), ("all", "Intero periodo")]
 
-# ── Mappa codice infrazione → categoria normativa ─────────────────────────────────
-# Raggruppa i codici in categorie leggibili con riferimento normativo.
-# Codici interni delle infrazioni (es. "ContinuousDriving").
-_CATEGORY = {
-    "ContinuousDriving":    "Guida continua (Art. 7)",
-    "DayDriving":           "Guida giornaliera (Art. 6§1)",
-    "DayDriving_9":         "Guida giornaliera (Art. 6§1)",
-    "DayDriving_10":        "Guida giornaliera (Art. 6§1)",
-    "WeekDriving_one":      "Guida settimanale (Art. 6§2)",
-    "WeekDriving_two":      "Guida bisettimanale (Art. 6§3)",
-    "BiWeekDriving":        "Guida bisettimanale (Art. 6§3)",
-    "Daily_TooShort":       "Riposo giornaliero (Art. 8§1)",
-    "Daily_TooShort_Reduced": "Riposo giornaliero (Art. 8§1)",
-    "Daily_TooLate":        "Riposo giornaliero (Art. 8§1)",
-    "Weekly_TooShort":      "Riposo settimanale (Art. 8§6)",
-    "Weekly_TooLate":       "Riposo settimanale (Art. 8§6)",
-    "Weekly_TooShort_NOC":  "Riposo settimanale ridotto (Art. 8§6)",
-    "ContinuousWorking_69": "Lavoro continuo (Dir. 2002/15 Art. 5)",
-    "ContinuousWorking_6":  "Lavoro continuo (Dir. 2002/15 Art. 5)",
-    "WeekWorking_48":       "Ore lavoro settimanali (Dir. 2002/15 Art. 4)",
-    "WeekWorking_60":       "Ore lavoro settimanali max (Dir. 2002/15 Art. 4)",
-    "Working_IsNight_10":   "Lavoro notturno (Dir. 2002/15 Art. 7)",
+# Riferimento normativo e spiegazione breve per ogni tipo (testi nostri)
+NORMA = {
+    "ContinuousDriving": "Reg. 561/2006 Art. 7 — dopo 4h30 di guida serve una pausa di almeno 45 min, frazionabile in 15 + 30 min.",
+    "DayDriving_9": "Reg. 561/2006 Art. 6§1 — guida giornaliera max 9h; 10h al massimo 2 volte a settimana.",
+    "DayDriving_10": "Reg. 561/2006 Art. 6§1 — anche nei giorni estesi la guida giornaliera non può superare 10h.",
+    "WeekDriving_one": "Reg. 561/2006 Art. 6§2 — guida settimanale max 56h.",
+    "WeekDriving_two": "Reg. 561/2006 Art. 6§3 — guida in due settimane consecutive max 90h.",
+    "NightDrivingBus": "Reg. 561/2006 Art. 7 (servizi occasionali bus) — tra le 22 e le 6, in multipresenza, pausa dopo 3h di guida.",
+    "Rest_DailyNormal_Fine": "Reg. 561/2006 Art. 8§2 — riposo giornaliero regolare di 11h entro 24h dalla fine del riposo precedente.",
+    "Rest_DailySplit_Fine": "Reg. 561/2006 Art. 4(g) — riposo frazionato: prima 3h, poi 9h.",
+    "Rest_DailyReduced_Fine": "Reg. 561/2006 Art. 8§4 — riposo ridotto almeno 9h, max 3 volte tra due riposi settimanali.",
+    "Rest_DailyStaff_Fine": "Reg. 561/2006 Art. 8§5 — in multipresenza 9h di riposo entro 30h.",
+    "Weekly_TooShort_45": "Reg. 561/2006 Art. 8§6 — in 2 settimane consecutive servono 2 riposi regolari di 45h, oppure 1 regolare e 1 ridotto (≥ 24h).",
+    "Weekly_TooShort_24": "Reg. 561/2006 Art. 8§6 — il riposo settimanale ridotto non può essere inferiore a 24h.",
+    "Weekly_TooLate": "Reg. 561/2006 Art. 8§6 — il riposo settimanale deve iniziare entro 6 periodi di 24h dal precedente.",
+    "Weekly_TooLate_Bus": "Reg. 561/2006 Art. 8§6a — servizi occasionali bus: deroga fino a 12 periodi di 24h.",
+    "Weekly_TooShort_Bus": "Reg. 561/2006 Art. 8§6a — dopo la deroga dei 12 giorni servono riposi più lunghi.",
+    "Rest45InVehicle": "Reg. 561/2006 Art. 8§8 (dal 20/08/2020) — il riposo settimanale regolare non può essere trascorso nel veicolo.",
+    "WeekWorking_48": "Dir. 2002/15/CE Art. 4 — orario medio settimanale max 48h sul periodo di riposo di riferimento.",
+    "WeekWorking_60": "Dir. 2002/15/CE Art. 4 — orario settimanale max 60h.",
+    "Working_IsNight_10": "Dir. 2002/15/CE Art. 7 — con lavoro notturno l'orario giornaliero non può superare 10h.",
+    "ContinuousWorking_6": "Dir. 2002/15/CE Art. 5 — oltre 6h di lavoro servono almeno 30 min di pausa.",
+    "ContinuousWorking_9": "Dir. 2002/15/CE Art. 5 — oltre 9h di lavoro servono almeno 45 min di pausa.",
+    "ContinuousWorking_6S": "Dir. 2002/15/CE Art. 5 — non si può lavorare più di 6h consecutive senza pausa.",
+    "Missing_CountryCode": "Reg. 165/2014 Art. 34§6(f) — il simbolo del paese va inserito all'inizio e alla fine del periodo di lavoro giornaliero.",
+    "Missing_CountryCode_Border": "Reg. 165/2014 Art. 34§7 — dal 02/02/2022 va inserito il paese anche all'attraversamento di frontiera.",
+    "Missing_ManualEntry": "Reg. 165/2014 Art. 34§3 — al reinserimento della carta vanno inserite a mano le attività svolte senza carta.",
+    "Mode_Incorrect_Use": "Reg. 165/2014 Art. 34§5 — a fine giornata va selezionato il riposo sul tachigrafo.",
+    "VirtualTravel": "Spostamento non registrato tra la fine e l'inizio di due periodi di lavoro in paesi diversi.",
+    "VehicleCheck": "Controllo del veicolo prima della partenza (durata scelta nelle impostazioni).",
+    "Weekly_TooShort_International": "Reg. 561/2006 Art. 8§6 (dal 20/08/2020) — nel trasporto merci internazionale due riposi settimanali ridotti consecutivi all'estero sono ammessi solo se compensati prima del riposo settimanale successivo e con almeno 4 riposi settimanali (2 regolari) in 4 settimane.",
+    "FerryButtonInvalid": "Reg. 561/2006 Art. 9 — il riposo su traghetto o treno vale solo se il conducente dispone di una cabina letto o cuccetta.",
+    "CardDownload_28": "Reg. UE 581/2010 — i dati della carta del conducente vanno scaricati almeno ogni 28 giorni.",
+    "DataGap": "Tra due scarichi del conducente mancano dei dati: il periodo è considerato riposo, quindi le valutazioni vicine sono incerte.",
 }
 
-# Icone per ogni categoria (visualizzata nell'intestazione del pannello)
-_CAT_ICON = {
-    "Guida continua (Art. 7)":                    "🚗",
-    "Guida giornaliera (Art. 6§1)":               "📅",
-    "Guida settimanale (Art. 6§2)":               "📆",
-    "Guida bisettimanale (Art. 6§3)":             "📆",
-    "Riposo giornaliero (Art. 8§1)":              "🛏",
-    "Riposo settimanale (Art. 8§6)":              "😴",
-    "Riposo settimanale ridotto (Art. 8§6)":      "😴",
-    "Lavoro continuo (Dir. 2002/15 Art. 5)":      "🔧",
-    "Ore lavoro settimanali (Dir. 2002/15 Art. 4)": "⏱",
-    "Ore lavoro settimanali max (Dir. 2002/15 Art. 4)": "⏱",
-    "Lavoro notturno (Dir. 2002/15 Art. 7)":      "🌙",
+_SHORT = {  # nomi brevi per il filtro per tipo
+    "DayDriving_9": "Guida giornaliera 9h", "DayDriving_10": "Guida giornaliera 10h",
+    "ContinuousDriving": "Guida continua", "WeekDriving_one": "Guida settimanale",
+    "WeekDriving_two": "Guida bisettimanale", "NightDrivingBus": "Guida notturna bus",
+    "Rest_DailyNormal_Fine": "Riposo giornaliero regolare",
+    "Rest_DailySplit_Fine": "Riposo giornaliero frazionato",
+    "Rest_DailyReduced_Fine": "Riposo giornaliero ridotto",
+    "Rest_DailyStaff_Fine": "Riposo in multipresenza",
+    "Weekly_TooShort_45": "Riposo settimanale < 45h", "Weekly_TooShort_24": "Riposo settimanale < 24h",
+    "Weekly_TooLate": "Riposo settimanale in ritardo", "Weekly_TooLate_Bus": "Riposo settimanale in ritardo (bus)",
+    "Weekly_TooShort_Bus": "Riposo settimanale breve (bus)", "Rest45InVehicle": "Riposo nel veicolo",
+    "WeekWorking_48": "Orario settimanale 48h", "WeekWorking_60": "Orario settimanale 60h",
+    "Working_IsNight_10": "Lavoro notturno 10h", "ContinuousWorking_6": "Pause lavoro 6-9h",
+    "ContinuousWorking_9": "Pause lavoro > 9h", "ContinuousWorking_6S": "Lavoro continuo > 6h",
+    "Missing_CountryCode": "Simbolo paese", "Missing_CountryCode_Border": "Simbolo paese (frontiera)",
+    "Missing_ManualEntry": "Inserimento manuale", "VirtualTravel": "Viaggio virtuale",
+    "Mode_Incorrect_Use": "Uso del commutatore", "VehicleCheck": "Ispezione veicolo",
+    "CardDownload_28": "Scarico carta entro 28 giorni",
+    "Weekly_TooShort_International": "Due ridotti all'estero non compensati",
+    "FerryButtonInvalid": "Commutatore traghetto/treno", "DataGap": "Dati mancanti",
 }
 
-
-def _cat(code: str) -> str:
-    """Ritorna la categoria leggibile per un codice infrazione, o "Altro"."""
-    return _CATEGORY.get(code, "Altro")
+_LABEL = {"fontSize": "0.74rem", "color": C["muted"], "fontWeight": "700", "marginBottom": "4px"}
 
 
-def _viol_row(v) -> html.Tr:
-    """
-    Costruisce una riga della tabella per una singola infrazione.
-
-    Colonne:
-        Data:       data dell'infrazione in formato italiano
-        Infrazione: titolo + dettaglio normativo
-        Valori:     valore rilevato, limite normativo, eccesso
-        Severità:   badge colorato con icona e livello
-    """
-    return html.Tr([
-        # Colonna data
-        html.Td(v.date_display,
-                style={"fontFamily": "'DM Mono'", "fontSize": "0.8rem",
-                       "color": C["muted"], "whiteSpace": "nowrap"}),
-
-        # Colonna infrazione: titolo + dettaglio
-        html.Td([
-            html.Div(v.description, style={"fontWeight": "600", "fontSize": "0.85rem"}),
-            html.Div(v.detail, style={"fontSize": "0.78rem", "color": C["muted"], "marginTop": "2px"}),
-        ]),
-
-        # Colonna valori: rilevato, limite, eccesso
-        html.Td([
-            html.Div(f"Rilevato: {v.value_h}",  style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem"}),
-            html.Div(f"Limite:   {v.limit_h}",  style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem", "color": C["muted"]}),
-            html.Div(f"Eccesso:  {v.excess_h}", style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem", "color": v.color}),
-        ]),
-
-        # Colonna severità: punto pulsante + badge colorato
-        html.Td(html.Span([
-            # "ping-dot": animazione CSS pulsante (cerchio rosso lampeggiante)
-            # mostrata solo per le infrazioni più gravi (Molto Grave)
-            html.Span(className="ping-dot") if v.severity == "Molto Grave" else None,
-            badge(f"{v.icon} {v.severity}", v.color),
-        ], style={"display": "flex", "alignItems": "center", "gap": "4px"})),
-    ])
+def _valid_until(cd: CardData) -> datetime:
+    """Fine della finestra: data dello scarico o, se assente, ultimo giorno di dati."""
+    for txt in (cd.driver.last_download,):
+        try:
+            return datetime.strptime(txt, "%d/%m/%Y %H:%M")
+        except (TypeError, ValueError):
+            pass
+    last = max((d.date for d in cd.activities), default=None)
+    return datetime.fromisoformat(last) + timedelta(days=1) if last else datetime.now()
 
 
-def _group_badge(items: list) -> html.Span:
-    """
-    Costruisce i mini-badge con conteggio per severità nell'intestazione del gruppo.
+def _stars(n: int, color: str) -> html.Span:
+    return html.Span("★" * n + "☆" * (4 - n), title=f"{n}/4",
+                     style={"color": color, "letterSpacing": "1px"})
 
-    Mostra per ogni severità presente nel gruppo un badge con il conteggio:
-    es. "2" (rosso) "1" (arancione) = 2 molto gravi, 1 grave nel gruppo.
 
-    Parametro 'items': lista di Violation per questo gruppo/categoria.
-    """
-    # Conta le infrazioni per severità
-    counts = defaultdict(int)
-    for v in items:
-        counts[v.severity] += 1
+def _item(v, show_details: bool) -> html.Div:
+    sev = next((s for s in SEV_INFO if s[0] == v.severity), WARN_INFO)
+    warn = sev is WARN_INFO
+    return html.Div([
+        html.Div([
+            html.Span("Avvertenza" if warn else "Fallo", style=_LABEL),
+            html.Span([None if warn else _stars(sev[1], sev[3]),
+                       html.Span(f"  {sev[2]}", style={"color": sev[3], "fontSize": "0.76rem",
+                                                      "fontWeight": "600"})]),
+        ], style={"display": "flex", "justifyContent": "space-between", "gap": "8px",
+                  "flexWrap": "wrap"}),
+        html.Div(v.description, style={"fontSize": "0.9rem", "fontWeight": "600",
+                                       "margin": "2px 0 8px"}),
+        html.Div("Periodo", style=_LABEL),
+        html.Div(v.period, style={"fontFamily": "'Overpass'", "fontSize": "0.84rem",
+                                  "marginBottom": "8px"}),
+        html.Div([
+            html.Div("Dettagli", style=_LABEL),
+            html.Div(v.detail, style={"fontFamily": "'Overpass'", "fontSize": "0.84rem"}),
+            html.Details([
+                html.Summary("ℹ️ Norma", style={"cursor": "pointer", "color": C["muted"],
+                                                "fontSize": "0.76rem", "marginTop": "6px"}),
+                html.Div(NORMA.get(v.code, ""), style={"fontSize": "0.8rem",
+                                                       "color": C["muted"], "padding": "4px 0"}),
+            ]),
+        ]) if show_details else None,
+    ], style={"background": C["card"], "border": f"1px solid {C['border']}",
+              "borderLeft": f"4px solid {sev[3]}", "borderRadius": "8px",
+              "padding": "12px 14px", "marginBottom": "10px"},
+        **{"data-code": v.code})
 
-    parts = []
-    # Itera per severità decrescente (dal più grave al meno grave)
-    for sev, color in [(SEV_VERY, C["danger"]), (SEV_HIGH, C["warning"]), (SEV_LOW, "#F59E0B")]:
-        if counts[sev]:
-            parts.append(html.Span(f"{counts[sev]}", style={
-                "background": color + "22",
-                "border": f"1px solid {color}55",
-                "color": color,
-                "borderRadius": "10px",
-                "padding": "1px 8px",
-                "fontSize": "0.72rem",
-                "fontWeight": "700",
-                "marginLeft": "6px",
-            }))
-    return html.Span(parts)
+
+def filter_violations(cd: CardData, period: str, sevs, codes):
+    """Applica i filtri del menu alle infrazioni del file."""
+    # le infrazioni usano lo storico unito degli scarichi del conducente
+    from models.history import violations_with_history
+    viols = violations_with_history(cd)
+    if period and period != "all":
+        since = _valid_until(cd) - timedelta(days=int(period))
+        viols = [v for v in viols if v.date >= since.date().isoformat()]
+    sevs = set(sevs or [])
+    codes = set(codes or [])
+    # le avvertenze "Dati mancanti" sono sempre mostrate
+    # le avvertenze (senza stelle) seguono solo il filtro per tipo
+    return [v for v in viols if v.code == "DataGap"
+            or (v.code in codes and (v.severity in sevs or v.severity == "W"))]
+
+
+def build_list(cd: CardData, period: str, sevs, codes, details) -> html.Div:
+    viols = filter_violations(cd, period, sevs, codes)
+    vs = violation_summary(viols)
+    counters = html.Div([
+        html.Div([
+            html.Div(str(vs[code]), className="stat-value", style={"color": color}),
+            html.Div(label, className="stat-label"),
+        ], className="stat-card", style={"borderColor": color + "33", "flex": "1",
+                                          "minWidth": "140px"})
+        for code, _, label, color in SEV_INFO
+    ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap", "marginBottom": "16px"})
+
+    if not viols:
+        body = empty_state("✅ L'elenco dei falli è vuoto")
+    else:
+        show = bool(details)
+        # Contenuto: dalla più recente alla più vecchia
+        body = html.Div([_item(v, show) for v in reversed(viols)])
+    return html.Div([counters, body])
 
 
 def render(cd: CardData) -> html.Div:
-    """
-    Costruisce la tab Infrazioni completa.
+    valid = _valid_until(cd)
+    all_codes = [code for _, group in GROUPS for code in group]
+    type_filter = html.Details([
+        html.Summary("Filtro per tipo", style={"cursor": "pointer", "fontSize": "0.84rem"}),
+        html.Div([
+            html.Div([
+                html.Div(title, style={**_LABEL, "marginTop": "10px"}),
+                dcc.Checklist(
+                    id={"type": "viol-code-filter", "group": i},
+                    options=[{"label": f" {_SHORT.get(code, code)}", "value": code}
+                             for code in group],
+                    value=group, persistence=True, persistence_type="local",
+                    labelStyle={"display": "block", "fontSize": "0.82rem", "color": C["text"]},
+                ),
+            ]) for i, (title, group) in enumerate(GROUPS)
+        ], style={"display": "grid", "gridTemplateColumns": "repeat(auto-fill, minmax(240px, 1fr))",
+                  "gap": "6px 20px"}),
+    ], style={"marginTop": "10px"})
 
-    Flusso:
-    1. Rileva le infrazioni tramite detect_violations()
-    2. Calcola il riepilogo per severità (violation_summary)
-    3. Mostra le stat-card con i conteggi
-    4. Se nessuna infrazione, mostra "Conforme"
-    5. Altrimenti raggruppa per categoria e mostra accordion
-    """
-    viols = detect_violations(cd.activities)   # lista di Violation
-    vs    = violation_summary(viols)            # {SEV_VERY: N, SEV_HIGH: N, SEV_LOW: N, "total": N}
-
-    # ── Riga stat-card: 3 severità + totale ──────────────────────────────────────
-    stat_row = dbc.Row([
-        dbc.Col(html.Div([
-            html.Div("🚨", className="stat-icon", style={"color": SEV_COLORS[SEV_VERY]}),
-            html.Div(str(vs[SEV_VERY]), className="stat-value", style={"color": SEV_COLORS[SEV_VERY]}),
-            html.Div("Molto Gravi", className="stat-label"),
-        ], className="stat-card"), xs=4, md=3),
-
-        dbc.Col(html.Div([
-            html.Div("🔴", className="stat-icon", style={"color": SEV_COLORS[SEV_HIGH]}),
-            html.Div(str(vs[SEV_HIGH]), className="stat-value", style={"color": SEV_COLORS[SEV_HIGH]}),
-            html.Div("Gravi", className="stat-label"),
-        ], className="stat-card"), xs=4, md=3),
-
-        dbc.Col(html.Div([
-            html.Div("🟡", className="stat-icon", style={"color": SEV_COLORS[SEV_LOW]}),
-            html.Div(str(vs[SEV_LOW]), className="stat-value", style={"color": SEV_COLORS[SEV_LOW]}),
-            html.Div("Lievi", className="stat-label"),
-        ], className="stat-card"), xs=4, md=3),
-
-        dbc.Col(html.Div([
-            html.Div("⚠️", className="stat-icon"),
-            html.Div(str(vs["total"]), className="stat-value"),
-            html.Div("Totale", className="stat-label"),
-        ], className="stat-card"), xs=12, md=3),
-    ], className="g-3 mb-3")
-
-    # ── Caso nessuna infrazione ───────────────────────────────────────────────────
-    if not viols:
-        body = section(
-            "Infrazioni Reg. CE 561/2006 + Dir. 2002/15/CE",
-            html.Div("✅  Nessuna infrazione rilevata",
-                     style={"textAlign": "center", "color": C["success"], "padding": "32px",
-                            "fontSize": "0.95rem"}),
-        )
-        return html.Div([stat_row, body])
-
-    # ── Raggruppa le infrazioni per categoria normativa ───────────────────────────
-    by_cat: dict = defaultdict(list)
-    for v in viols:
-        by_cat[_cat(v.code)].append(v)   # chiave = categoria (es. "Guida continua (Art. 7)")
-
-    # ── Costruisce i pannelli accordion per categoria ─────────────────────────────
-    accordions = []
-    for cat_name, items in sorted(by_cat.items()):   # ordine alfabetico per categoria
-        icon = _CAT_ICON.get(cat_name, "⚠️")
-
-        # Tabella delle infrazioni per questa categoria
-        tbl = html.Table(
-            [html.Thead(html.Tr([html.Th(h) for h in ["Data", "Infrazione", "Valori", "Severità"]])),
-             html.Tbody([_viol_row(v) for v in items])],
-            className="veh-table",
-            style={"margin": "0"},
-        )
-
-        # Pannello accordion HTML nativo
-        # open=True: aperto di default se contiene infrazioni gravi/molto gravi
-        accordions.append(
-            html.Details([
-                html.Summary([
-                    html.Span(icon, style={"fontSize": "1rem", "marginRight": "8px"}),
-                    html.Span(cat_name, style={"flex": "1"}),   # etichetta espandidle
-                    _group_badge(items),                         # mini-badge per severità
-                    html.Span("▼", className="viol-group-chevron"),  # freccia giù
-                ]),
-                tbl,
-            ], className="viol-group",
-               # Apre automaticamente i pannelli con infrazioni gravi o molto gravi
-               open=True if items and any(v.severity in (SEV_VERY, SEV_HIGH) for v in items) else False),
-        )
-
-    # Contenitore con id stabile per il filtro JS globale
-    accordion_wrapper = html.Div(
-        accordions,
-        id=_TABLE_ID,
-        style={"marginTop": "4px"},
+    filters = section(
+        "Filtri",
+        html.Div([
+            html.Div([
+                html.Div("Periodo", style=_LABEL),
+                dcc.RadioItems(
+                    id="viol-period", value="56", persistence=True, persistence_type="local",
+                    options=[{"label": f" {lbl}", "value": val} for val, lbl in PERIOD_OPTIONS],
+                    labelStyle={"display": "block", "fontSize": "0.82rem", "color": C["text"]},
+                ),
+            ]),
+            html.Div([
+                html.Div("Gravità", style=_LABEL),
+                dcc.Checklist(
+                    id="viol-sev", value=[s[0] for s in SEV_INFO], persistence=True,
+                    persistence_type="local",
+                    options=[{"label": html.Span([" ", _stars(n, col), f"  {lbl}"]),
+                              "value": code} for code, n, lbl, col in SEV_INFO],
+                    labelStyle={"display": "block", "fontSize": "0.82rem", "color": C["text"]},
+                ),
+            ]),
+            html.Div([
+                html.Div("Visualizzazione", style=_LABEL),
+                dcc.Checklist(
+                    id="viol-details", value=["on"], persistence=True, persistence_type="local",
+                    options=[{"label": " Dettagli", "value": "on"}],
+                    labelStyle={"fontSize": "0.82rem", "color": C["text"]},
+                ),
+            ]),
+        ], style={"display": "flex", "gap": "40px", "flexWrap": "wrap"}),
+        type_filter,
     )
 
     return html.Div([
-        stat_row,
-        section(
-            f"Infrazioni Reg. CE 561/2006 + Dir. 2002/15/CE ({vs['total']})",
-            filter_bar(
-                filter_blocks_input("Cerca infrazione / data...", _TABLE_ID, width="280px"),
-                filter_count_badge(_TABLE_ID),
-            ),
-            accordion_wrapper,
-        ),
+        html.Div(f"Valido: {valid.strftime('%d/%m/%Y %H:%M')}",
+                 style={"color": C["muted"], "fontSize": "0.84rem", "marginBottom": "12px"}),
+        filters,
+        bar_for(cd, "infringement", 56),
+        html.Div(build_list(cd, "56", [s[0] for s in SEV_INFO], all_codes, ["on"]),
+                 id="viol-list"),
     ])

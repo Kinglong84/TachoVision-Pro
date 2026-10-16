@@ -15,7 +15,7 @@ La separazione tra caricamento (load_data) e rendering (render_page)
 permette di navigare tra le tab senza ricaricare il file DDD.
 """
 
-from dash import Input, Output, State, no_update, html
+from dash import Input, Output, State, callback_context, no_update, html
 from dash.exceptions import PreventUpdate
 
 from models.card_data import CardData
@@ -83,7 +83,7 @@ def _welcome_screen() -> html.Div:
             html.Div("🚛", style={"fontSize": "3.5rem", "marginBottom": "16px"}),
             html.H2("TachoVision Pro", style={
                 "color": C["accent"], "marginBottom": "8px",
-                "fontFamily": "'DM Mono'", "fontWeight": "500",
+                "fontFamily": "'Overpass'", "fontWeight": "500",
             }),
             html.P(
                 "Seleziona un file .DDD per visualizzare le attività del conducente.",
@@ -132,6 +132,74 @@ def _welcome_screen() -> html.Div:
     })
 
 
+def read_card_to_store() -> dict:
+    """
+    Legge la carta dal primo lettore USB con carta inserita e ritorna il dict
+    per store-data (con i byte grezzi in _raw_bytes per l'archivio).
+    Usata dal pulsante "Leggi Carta" e dalla lettura automatica.
+    """
+    import base64
+    from datetime import datetime
+    from models.parser import parse_ddd
+    from models.analytics import enrich
+    from services.card_service import PYSCARD_OK, list_readers, get_status, read_card
+
+    # Verifica lettore disponibile
+    if not PYSCARD_OK:
+        from controllers.data_controller import make_demo
+        demo = make_demo()
+        demo.errors = ["pyscard non installato. Esegui: pip install pyscard"]
+        return demo.to_dict()
+
+    readers = list_readers()
+    if not readers:
+        from controllers.data_controller import make_demo
+        demo = make_demo()
+        demo.errors = ["Nessun lettore USB rilevato. Collega il lettore e riprova."]
+        return demo.to_dict()
+
+    try:
+        status = get_status()
+        reader_name = next(
+            (r["name"] for r in status.get("readers", []) if r.get("card")), None
+        )
+        if not reader_name:
+            from controllers.data_controller import make_demo
+            demo = make_demo()
+            demo.errors = [f"Lettori trovati: {readers}. Inserisci la carta e riprova."]
+            return demo.to_dict()
+
+        # Leggi i byte grezzi dalla carta
+        raw_bytes = read_card(reader_name)
+
+        # Parsa e arricchisci
+        cd = parse_ddd(raw_bytes)
+        cd = enrich(cd)
+        cd.demo = False
+        cd.driver.last_download = datetime.now().strftime("%d/%m/%Y %H:%M")
+        cd.driver.file_size = str(len(raw_bytes))
+
+        d = cd.to_dict()
+        # Encode base64 dei byte grezzi → auto_save_ddd li salva su disco e in archivio
+        d["_raw_bytes"] = base64.b64encode(raw_bytes).decode("ascii")
+        d["_source"] = "smartcard"
+        try:
+            from services.accessories import auto_send
+            fname = (f"C_{datetime.utcnow().strftime('%Y%m%d_%H%M')}_"
+                     f"{cd.driver.surname}_{cd.driver.card_number}.DDD")
+            auto_send(cd, raw_bytes, fname)
+        except Exception as e:   # l'invio non deve mai bloccare la lettura
+            import logging
+            logging.getLogger(__name__).warning("Invio automatico non riuscito: %s", e)
+        return d
+
+    except Exception as e:
+        from controllers.data_controller import make_demo
+        demo = make_demo()
+        demo.errors = [f"Errore lettura carta: {e}"]
+        return demo.to_dict()
+
+
 def register(app):
     """Registra i callback di rendering sull'istanza Dash."""
 
@@ -142,65 +210,33 @@ def register(app):
         prevent_initial_call=True,
     )
     def load_from_card(n_clicks):
-        """
-        Legge la carta dal primo lettore USB, parsa i dati e li salva nello store.
-        Passa i byte grezzi in _raw_bytes (base64) così auto_save_ddd li archivia.
-        """
-        import base64
-        from datetime import datetime
-        from models.parser import parse_ddd
-        from models.analytics import enrich
-        from services.card_service import PYSCARD_OK, list_readers, get_status, read_card
-
+        """Pulsante "Leggi Carta": legge la carta e salva i dati nello store."""
         if not n_clicks:
             raise PreventUpdate
+        return read_card_to_store()
 
-        # Verifica lettore disponibile
+    # ── Callback 1a-bis: lettura automatica ──────────────────────────────────────
+    @app.callback(
+        Output("store-data", "data", allow_duplicate=True),
+        Output("store-card-status", "data"),
+        Input("card-poll", "n_intervals"),
+        State("store-card-status", "data"),
+        prevent_initial_call=True,
+    )
+    def auto_read(_n, last):
+        from models.settings import load_settings
+        if not load_settings().automaticread:
+            raise PreventUpdate
+        from services.card_service import PYSCARD_OK, get_status
         if not PYSCARD_OK:
-            from controllers.data_controller import make_demo
-            demo = make_demo()
-            demo.errors = ["pyscard non installato. Esegui: pip install pyscard"]
-            return demo.to_dict()
-
-        readers = list_readers()
-        if not readers:
-            from controllers.data_controller import make_demo
-            demo = make_demo()
-            demo.errors = ["Nessun lettore USB rilevato. Collega il lettore e riprova."]
-            return demo.to_dict()
-
-        try:
-            status = get_status()
-            reader_name = next(
-                (r["name"] for r in status.get("readers", []) if r.get("card")), None
-            )
-            if not reader_name:
-                from controllers.data_controller import make_demo
-                demo = make_demo()
-                demo.errors = [f"Lettori trovati: {readers}. Inserisci la carta e riprova."]
-                return demo.to_dict()
-
-            # Leggi i byte grezzi dalla carta
-            raw_bytes = read_card(reader_name)
-
-            # Parsa e arricchisci
-            cd = parse_ddd(raw_bytes)
-            cd = enrich(cd)
-            cd.demo = False
-            cd.driver.last_download = datetime.now().strftime("%d/%m/%Y %H:%M")
-            cd.driver.file_size = str(len(raw_bytes))
-
-            d = cd.to_dict()
-            # Encode base64 dei byte grezzi → auto_save_ddd li salva su disco e in archivio
-            d["_raw_bytes"] = base64.b64encode(raw_bytes).decode("ascii")
-            d["_source"] = "smartcard"
-            return d
-
-        except Exception as e:
-            from controllers.data_controller import make_demo
-            demo = make_demo()
-            demo.errors = [f"Errore lettura carta: {e}"]
-            return demo.to_dict()
+            raise PreventUpdate
+        st = get_status()
+        atr = next((r.get("atr") for r in st.get("readers", []) if r.get("card")), None)
+        prev = (last or {}).get("atr")
+        if not atr or atr == prev:
+            # nessuna carta, o la stessa carta già letta: niente da fare
+            return no_update, {"atr": atr}
+        return read_card_to_store(), {"atr": atr}
 
     # ── Callback 1b: caricamento file .DDD ────────────────────────────────────────
     @app.callback(
@@ -249,8 +285,9 @@ def register(app):
         Input("store-data",      "data"),    # triggera quando cambiano i dati
         Input("store-tab",       "data"),    # triggera quando cambia la tab
         Input("store-gnss-date", "data"),    # triggera quando cambia il filtro GPS
+        Input("store-settings",  "data"),    # triggera quando si salvano le impostazioni
     )
-    def render_page(raw, active_tab, gnss_date):
+    def render_page(raw, active_tab, gnss_date, _settings):
         """
         Ridisegna l'intera pagina ogni volta che cambiano i dati o la tab.
 
@@ -263,10 +300,16 @@ def register(app):
         """
         active_tab = active_tab or "panoramica"   # default alla tab panoramica
 
+        # Salvando le impostazioni dalla loro tab non si ridisegna la pagina
+        # (resterebbe cancellato il messaggio "Impostazioni salvate")
+        triggered = [t["prop_id"] for t in callback_context.triggered]
+        if triggered == ["store-settings.data"] and active_tab == "impostazioni":
+            raise PreventUpdate
+
         if not raw:
             sidebar = _sidebar(active_tab)
-            # Archivio e condivisione non richiedono un file caricato
-            if active_tab in ("archivio", "condivisione"):
+            # Archivio, condivisione e impostazioni non richiedono un file caricato
+            if active_tab in ("archivio", "condivisione", "impostazioni"):
                 content = render_tab(active_tab, None)
                 return html.Div(), sidebar, content
             return html.Div(), sidebar, _welcome_screen()
@@ -276,6 +319,15 @@ def register(app):
 
         # Crea i banner di errore (mostrati se il parsing ha avuto problemi)
         banners = [alert_banner(f"⚠️  {err}", color="#F59E0B") for err in cd.errors]
+        # giorni dall'ultimo scarico
+        try:
+            from services.accessories import reminders
+            for name, card, days in reminders():
+                banners.append(alert_banner(
+                    f"🔔 Promemoria — {name} ({card}): giorni dall'ultimo scarico: {days} "
+                    f"(scadenza a 28 giorni)", color="#EF4444" if days >= 28 else "#F59E0B"))
+        except Exception:
+            pass
 
         # Barra del conducente (mostra nome, numero carta, ecc.)
         badge = html.Div([
@@ -298,37 +350,3 @@ def register(app):
             )
 
         return badge, sidebar, content
-
-    # ── Callback 3: filtro finestra temporale attività ────────────────────────────
-    @app.callback(
-        Output("blocks-attivita",    "children"),
-        Output("attivita-days-count", "children"),
-        Input("input-attivita-from", "value"),
-        Input("input-attivita-to",   "value"),
-        State("store-data",          "data"),
-        prevent_initial_call=True,
-    )
-    def filter_attivita_range(date_from, date_to, raw):
-        """
-        Aggiorna le card attività quando l'utente cambia il range di date.
-
-        Filtra cd.activities al periodo selezionato e ricostruisce i blocchi.
-        """
-        if not raw:
-            raise PreventUpdate
-
-        cd = CardData.from_dict(raw)
-        days = cd.activities
-
-        if date_from:
-            days = [d for d in days if d.date >= date_from]
-        if date_to:
-            days = [d for d in days if d.date <= date_to]
-
-        shown = list(reversed(days))
-
-        from views.tabs.attivita import _build_blocks
-        gnss_dates = {g.date for g in cd.gnss_records} if cd.gnss_records else set()
-        blocks = _build_blocks(shown, cd, gnss_dates=gnss_dates)
-        count_label = f"{len(shown)} giorni"
-        return blocks, count_label

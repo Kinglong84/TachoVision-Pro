@@ -253,7 +253,7 @@ def _rebuild_ddd_bytes(cd) -> bytes:
 
     blocks = []
     d = cd.driver
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     def _ts(s):
         if not s: return _u32be(0)
@@ -262,51 +262,75 @@ def _rebuild_ddd_bytes(cd) -> bytes:
             except: pass
         return _u32be(0)
 
+    # EF_IDENTIFICATION Gen1: [nation:1][cardNumber:16][authority:36][issue:4]
+    # [validityBegin:4][expiry:4][surname:36][firstname:36][birthDate:4 BCD][language:2]
+    # (i campi testo hanno un byte iniziale di codepage, come nel parser)
+    from models.parser import EU_NATIONS
+    nation = next((k for k, v in EU_NATIONS.items() if v == d.issuing_nation), 0)
+
+    def _bcd_date(s):
+        try:
+            dt = datetime.strptime(s, "%d/%m/%Y")
+        except (TypeError, ValueError):
+            return b"\x00" * 4
+        txt = f"{dt.year:04d}{dt.month:02d}{dt.day:02d}"
+        return bytes(int(txt[i:i + 2], 16) for i in range(0, 8, 2))
+
     ident = (
-        bytes([0, 0, 0]) +
+        bytes([nation]) +
         _str_bytes(d.card_number, 16) +
-        _str_bytes(d.issuing_authority, 36) +
+        bytes([1]) + _str_bytes(d.issuing_authority, 35) +
         _ts(d.issue_date) +
         _ts(d.validity_begin) +
         _ts(d.expiry_date) +
-        bytes([0]) + _str_bytes(d.surname, 35) +
-        bytes([0]) + _str_bytes(d.firstname, 35) +
-        _ts(d.birth_date) +
+        bytes([1]) + _str_bytes(d.surname, 35) +
+        bytes([1]) + _str_bytes(d.firstname, 35) +
+        _bcd_date(d.birth_date) +
         _str_bytes(d.language, 2)
     )
     blocks.append(_tlv(0x0520, ident))
 
+    # Buffer attività Gen1: [oldest:2][newest:2] + record
+    # [prevLen:2][recLen:2][date:4][presence:2][distance:2][ACI…]
     act_records = bytearray()
-    act_records += b"\x00" * 4
+    prev_len = 0
+    newest_off = 0
 
     for day in cd.activities:
         try:
-            dt_ts = int(datetime.strptime(day.date, "%Y-%m-%d").timestamp())
-        except:
+            # data del record = mezzanotte UTC del giorno (come nel DDD originale)
+            dt_ts = int(datetime.strptime(day.date, "%Y-%m-%d")
+                        .replace(tzinfo=timezone.utc).timestamp())
+        except ValueError:
             continue
 
         ch = sorted(day.changes, key=lambda c: c.time)
         aci_bytes = bytearray()
         for c in ch:
+            # ACI 'scpaattttttttttt' (stesso layout del parser: activity >> 11, tempo 0x7FF)
             act_map  = {"Riposo": 0, "Disponibilità": 1, "Lavoro": 2, "Guida": 3}
             act_bits = act_map.get(c.activity, 0)
-            manual_bit = 1 if c.manual else 0
-            aci = (0 << 15) | (manual_bit << 14) | (act_bits << 10) | (c.time & 0x3FF)
+            not_inserted = 0 if c.card_inserted else 1
+            c_bit = 1 if (c.crew or c.manual) else 0
+            aci = (c_bit << 14) | (not_inserted << 13) | (act_bits << 11) | (c.time & 0x7FF)
             aci_bytes += struct.pack(">H", aci)
 
-        dist    = max(0, min(65535, int(day.distance_km * 10)))
+        dist    = max(0, min(65535, int(day.distance_km)))   # km interi
         rec_len = 12 + len(aci_bytes)
         rec = (
-            struct.pack(">H", 0) +
+            struct.pack(">H", prev_len) +
             struct.pack(">H", rec_len) +
             _u32be(dt_ts) +
             struct.pack(">H", 1) +
             struct.pack(">H", dist) +
             bytes(aci_bytes)
         )
+        newest_off = len(act_records)
         act_records += rec
+        prev_len = rec_len
 
-    blocks.append(_tlv(0x0504, bytes(act_records)))
+    # oldest = 0, newest = inizio dell'ultimo record (vedi _decode_activities_gen1)
+    blocks.append(_tlv(0x0504, struct.pack(">HH", 0, newest_off) + bytes(act_records)))
 
     if cd.vehicles:
         veh_data = struct.pack(">H", len(cd.vehicles))

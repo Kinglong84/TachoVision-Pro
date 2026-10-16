@@ -36,13 +36,13 @@ def _events_table(cd: CardData) -> html.Div:
 
     rows = [html.Tr([
         # Orario inizio evento
-        html.Td(e.begin_time, style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
+        html.Td(e.begin_time, style={"fontFamily": "'Overpass'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
         # Orario fine evento (o "—" se evento puntuale)
-        html.Td(e.end_time or "—",   style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
+        html.Td(e.end_time or "—",   style={"fontFamily": "'Overpass'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
         # Tipo evento (descrizione human-readable)
         html.Td(e.event_type, style={"fontSize": "0.82rem"}),
         # Targa del veicolo (o "—" se non applicabile)
-        html.Td(e.vehicle or "—",    style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem"}),
+        html.Td(e.vehicle or "—",    style={"fontFamily": "'Overpass'", "fontSize": "0.78rem"}),
     ]) for e in cd.events[:50]]   # max 50 eventi
 
     return html.Table([
@@ -64,10 +64,10 @@ def _faults_table(cd: CardData) -> html.Div:
                         style={"color": C["muted"], "fontSize": "0.82rem", "padding": "8px 0"})
 
     rows = [html.Tr([
-        html.Td(f.begin_time, style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
-        html.Td(f.end_time or "—",   style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
+        html.Td(f.begin_time, style={"fontFamily": "'Overpass'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
+        html.Td(f.end_time or "—",   style={"fontFamily": "'Overpass'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
         html.Td(f.fault_type, style={"fontSize": "0.82rem"}),
-        html.Td(f.vehicle or "—",    style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem"}),
+        html.Td(f.vehicle or "—",    style={"fontFamily": "'Overpass'", "fontSize": "0.78rem"}),
     ]) for f in cd.faults[:50]]
 
     return html.Table([
@@ -89,7 +89,7 @@ def _conditions_table(cd: CardData) -> html.Div:
                         style={"color": C["muted"], "fontSize": "0.82rem", "padding": "8px 0"})
 
     rows = [html.Tr([
-        html.Td(sc.entry_time,     style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
+        html.Td(sc.entry_time,     style={"fontFamily": "'Overpass'", "fontSize": "0.78rem", "whiteSpace": "nowrap"}),
         html.Td(sc.condition_type, style={"fontSize": "0.82rem"}),
     ]) for sc in cd.specific_conditions[:50]]
 

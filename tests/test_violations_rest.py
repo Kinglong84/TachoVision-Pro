@@ -11,7 +11,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from models.card_data import DayActivity, ActivityChange
-from models.violations import detect_violations
+from models.settings import Settings
+from models.violations import detect_violations as _detect
+
+# Impostazioni predefinite in UTC: i giorni di test sono costruiti in UTC
+SETTINGS = Settings({"timezone": "UTC"})
+
+
+def detect_violations(days):
+    return _detect(days, SETTINGS)
 
 D0 = date(2026, 6, 1)   # lunedì
 
@@ -39,7 +47,7 @@ def test_ferie_consecutive_non_sono_riposi_settimanali_ridotti():
     # Issue #2: 30 giorni di ferie = un unico riposo lungo, nessuna infrazione
     days = [_work_day(0, 8, 16)] + [_rest_day(i) for i in range(1, 31)] + [_work_day(31, 8, 16)]
     codes = _codes(days)
-    assert "Weekly_TooShort" not in codes
+    assert "Weekly_TooShort_45" not in codes
     assert "Weekly_TooLate" not in codes
 
 
@@ -47,14 +55,13 @@ def test_riposo_notturno_a_cavallo_mezzanotte_non_e_insufficiente():
     # Issue #3: lavoro 08-18 ogni giorno → riposo 18:00→08:00 = 14h, regolare
     days = [_work_day(i, 8, 18) for i in range(5)] + [_rest_day(5), _rest_day(6)]
     codes = _codes(days)
-    assert "Daily_TooShort" not in codes
-    assert "Daily_TooShort_Reduced" not in codes
+    assert not [c for c in codes if c.startswith("Rest_Daily")]
 
 
 def test_riposo_notturno_di_8h_e_insufficiente():
     # lavoro 06-22 → riposo 22:00→06:00 = 8h < 9h
     days = [_work_day(i, 6, 22) for i in range(4)] + [_rest_day(4), _rest_day(5)]
-    viols = [v for v in detect_violations(days) if v.code == "Daily_TooShort"]
+    viols = [v for v in detect_violations(days) if v.code.startswith("Rest_Daily")]
     assert viols, "atteso almeno un riposo giornaliero insufficiente"
     assert all(v.value_min == 480 for v in viols)
 
@@ -62,7 +69,7 @@ def test_riposo_notturno_di_8h_e_insufficiente():
 def test_tre_riposi_ridotti_ammessi_il_quarto_no():
     # lavoro 05-20 → riposo 20:00→05:00 = 9h (ridotto). 5 giornate consecutive.
     days = [_rest_day(0)] + [_work_day(i, 5, 20) for i in range(1, 6)] + [_rest_day(6), _rest_day(7)]
-    viols = [v for v in detect_violations(days) if v.code == "Daily_TooShort_Reduced"]
+    viols = [v for v in detect_violations(days) if v.code.startswith("Rest_Daily")]
     # riposi ridotti: notti 1→2, 2→3, 3→4, 4→5 → 4 ridotti, il 4° è infrazione
     assert len(viols) == 1
 
@@ -106,17 +113,17 @@ def _weeks(weekend_hours, n_weeks=None):
 
 def test_settimane_con_riposo_regolare_nessuna_infrazione():
     # Art. 8§6: ogni weekend 64h (regolare) → nessuna infrazione settimanale
-    assert "Weekly_TooShort" not in _codes(_weeks([64, 64]))
+    assert "Weekly_TooShort_45" not in _codes(_weeks([64, 64]))
 
 
 def test_un_ridotto_e_un_regolare_in_due_settimane_ammesso():
     # Art. 8§6: in 2 settimane consecutive basta 1 regolare + 1 ridotto ≥24h
-    assert "Weekly_TooShort" not in _codes(_weeks([40, 64, 40, 64]))
+    assert "Weekly_TooShort_45" not in _codes(_weeks([40, 64, 40, 64]))
 
 
 def test_due_ridotti_consecutivi_infrazione():
     # 2 settimane consecutive con soli riposi ridotti (40h) → infrazione
-    weekly = [v for v in detect_violations(_weeks([64, 40, 40, 64])) if v.code == "Weekly_TooShort"]
+    weekly = [v for v in detect_violations(_weeks([64, 40, 40, 64])) if v.code == "Weekly_TooShort_45"]
     assert len(weekly) == 1
 
 
@@ -151,5 +158,5 @@ def test_riposo_troncato_a_fine_dati_non_segnalato():
     days = [_work_day(i, 8, 18) for i in range(5)]
     days.append(_day(5, [(0, "Riposo"), (480, "Guida"), (720, "Riposo")]))
     codes = _codes(days)
-    assert "Weekly_TooShort" not in codes
-    assert "Daily_TooShort" not in codes
+    assert "Weekly_TooShort_45" not in codes
+    assert not [c for c in codes if c.startswith("Rest_Daily")]

@@ -1,178 +1,198 @@
 """
 views/tabs/panoramica.py
 ========================
-Tab "Dashboard / Panoramica": vista di riepilogo ad alto livello.
+Tab "Dashboard": la prima schermata dopo aver caricato un file.
 
-Questa tab è la prima che vede l'utente dopo aver caricato un file DDD.
-Mostra una "foto istantanea" dello stato del conducente:
-  - KPI numerici (giorni, km, ore guida, veicoli)
-  - Semaforo di conformità (verde/giallo/rosso)
-  - Grafico donut distribuzione ore
-  - Le infrazioni più gravi (max 3)
-  - Bar chart ore guida ultimi 14 giorni
-  - Lista veicoli
+In apertura il disco del cronotachigrafo della giornata (l'elemento che ogni
+autista riconosce: 24 ore in cerchio, un anello per attività), accanto il
+verdetto di conformità in parole semplici e quanto si può ancora guidare.
+Sotto: infrazioni principali, guida degli ultimi 14 giorni, veicoli recenti.
 
-La funzione principale 'render(cd)' viene chiamata da views/tabs/__init__.py
-tramite la funzione render_tab() che smista verso la view giusta.
+Navigazione tra le giornate: controllers/dashboard_controller.py.
 """
 
-from dash import html, dcc
+from datetime import date, timedelta
+
 import dash_bootstrap_components as dbc
-# dbc.Row/Col: layout a griglia Bootstrap (12 colonne) per disporre le sezioni
+from dash import dcc, html
 
-from views.components import stat_card, section, badge
-from views.charts import donut_hours, bar_daily_driving
-from views.theme import C, SEV_COLORS
 from models.analytics import compute_stats
-from models.violations import detect_violations, violation_summary, SEV_VERY, SEV_HIGH, SEV_LOW
 from models.card_data import CardData
+from models.violations import MI, MSI, SI, VSI, violation_summary
+from views.charts import bar_daily_driving, tacho_disc
+from views.components import section
+from views.theme import C
+
+_WEEKDAYS = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
+_MONTHS = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio",
+           "agosto", "settembre", "ottobre", "novembre", "dicembre"]
 
 
-def _semaphore(vs: dict) -> html.Div:
-    """
-    Costruisce il pannello "semaforo" di conformità.
+def _hm(m: int) -> str:
+    return f"{m // 60}:{m % 60:02d}"
 
-    Determina il colore e il messaggio in base al tipo di infrazioni presenti:
-      🚨 Rosso  → ci sono infrazioni "Molto Grave"
-      ⚠️ Arancione → solo infrazioni "Grave"
-      🟡 Giallo → solo infrazioni "Lieve"
-      ✅ Verde  → nessuna infrazione
 
-    Parametro 'vs': dizionario dal violation_summary()
-    { SEV_VERY: 2, SEV_HIGH: 0, SEV_LOW: 3, "total": 5 }
-    """
-    # Valutazione a cascata: dal più grave al più lieve
-    if vs[SEV_VERY] > 0:
-        color, icon, label = C["danger"], "🚨", "NON CONFORME"
-        detail = f"{vs[SEV_VERY]} molto gravi · {vs[SEV_HIGH]} gravi · {vs[SEV_LOW]} lievi"
-    elif vs[SEV_HIGH] > 0:
-        color, icon, label = C["warning"], "⚠️", "ATTENZIONE"
-        detail = f"{vs[SEV_HIGH]} infrazioni gravi · {vs[SEV_LOW]} lievi"
-    elif vs[SEV_LOW] > 0:
-        color, icon, label = "#F59E0B", "🟡", "VERIFICA"
-        detail = f"{vs[SEV_LOW]} infrazioni lievi"
-    else:
-        color, icon, label = C["success"], "✅", "CONFORME"
-        detail = "Nessuna infrazione rilevata"
+def worked_days(cd: CardData) -> list:
+    """Giorni (data del DDD) con guida o lavoro, in ordine."""
+    return sorted(d.date for d in cd.activities
+                  if d.minutes_of("Guida") + d.minutes_of("Lavoro") > 0)
 
-    # Il pannello ha sfondo colorato molto trasparente (+ "10" = 6% opacità)
-    return html.Div([
-        html.Div(icon, style={"fontSize": "2.6rem", "lineHeight": "1"}),
-        html.Div(label, className="semaphore-status", style={"color": color}),
-        html.Div(detail, className="semaphore-detail"),
-    ], className="semaphore-card", style={
-        "background": color + "10",
-        "border": f"2px solid {color}44",
-    })
+
+def _verdict(viols: list, cd: CardData):
+    """Verdetto sulle ultime 8 settimane (il periodo predefinito)."""
+    from views.tabs.infrazioni import _valid_until
+    since = (_valid_until(cd) - timedelta(days=56)).date().isoformat()
+    recent = [v for v in viols if v.date >= since]
+    if not recent:
+        return "In regola", "ok", "Nessuna infrazione nelle ultime 8 settimane."
+    n = len(recent)
+    head = f"{n} infrazion{'e' if n == 1 else 'i'} da verificare"
+    if max(v.stars for v in recent) >= 3:
+        return head, "bad", "Almeno una è molto grave: controlla la scheda Infrazioni."
+    return head, "warn", "Nelle ultime 8 settimane nessuna è molto grave."
 
 
 def _top_violations(viols: list) -> html.Div:
-    """
-    Mostra le top 3 infrazioni più gravi (o le prime 3 se tutte lievi).
-
-    Se non ci sono infrazioni, mostra un messaggio positivo verde.
-
-    Parametro 'viols': lista di oggetti Violation dal detect_violations()
-    """
-    # Prima prova a mostrare solo le gravi/molto gravi
-    serious = [v for v in viols if v.severity in (SEV_VERY, SEV_HIGH)]
-    # Se non ce ne sono, mostra le prime 3 in assoluto (lievi)
-    shown   = (serious or viols)[:3]   # max 3 infrazioni
-
+    """Le 3 infrazioni più gravi del file (o le prime 3, se tutte minori)."""
+    serious = sorted((v for v in viols if v.severity in (MSI, VSI, SI)), key=lambda v: -v.stars)
+    shown = (serious or viols)[:3]
     if not shown:
-        return html.Div("✅ Nessuna infrazione grave",
-                        style={"color": C["success"], "fontSize": "0.85rem", "padding": "8px 0"})
-
-    rows = []
-    for v in shown:
-        # Per ogni infrazione: badge severità | titolo + data | eccesso
-        rows.append(html.Div([
-            # Badge colorato con icona e severità
-            html.Span(f"{v.icon} {v.severity}", style={
-                "background": v.color + "22",
-                "border": f"1px solid {v.color}44",
-                "color": v.color,
-                "borderRadius": "4px",
-                "padding": "2px 8px",
-                "fontSize": "0.72rem",
-                "fontWeight": "700",
-                "whiteSpace": "nowrap",
-            }),
-            # Titolo e data (in un div flessibile che si adatta allo spazio)
+        return html.Div("Nessuna infrazione nel file.",
+                        style={"color": C["success"], "padding": "6px 0"})
+    return html.Div([
+        html.Div([
+            html.Span(v.severity, title=v.severity_label, style={
+                "background": v.color, "color": "#fff", "borderRadius": "3px",
+                "padding": "2px 8px", "fontSize": "0.78rem", "fontWeight": "800",
+                "minWidth": "42px", "textAlign": "center"}),
             html.Div([
-                html.Div(v.description, style={"fontSize": "0.82rem", "fontWeight": "600"}),
-                html.Div(v.date_display, style={"fontSize": "0.72rem", "color": C["muted"],
-                                                 "fontFamily": "'DM Mono'"}),
-            ], style={"flex": "1", "minWidth": 0}),   # flex:1 = occupa lo spazio restante
-            # Eccesso rispetto al limite (es. "+1h30")
-            html.Span(v.excess_h, style={"fontFamily": "'DM Mono'", "fontSize": "0.78rem",
-                                          "color": v.color, "whiteSpace": "nowrap"}),
-        ], style={"display": "flex", "alignItems": "center", "gap": "10px",
-                  "padding": "7px 0", "borderBottom": f"1px solid {C['border']}"}))
+                html.Div(v.description, style={"fontWeight": "600", "fontSize": "0.92rem",
+                                               "lineHeight": "1.3"}),
+                html.Div(f"{v.period} — {v.detail}",
+                         style={"fontSize": "0.84rem", "color": C["muted"]}),
+            ], style={"flex": "1", "minWidth": 0}),
+        ], style={"display": "flex", "gap": "12px", "alignItems": "flex-start",
+                  "padding": "9px 0", "borderBottom": f"1px solid {C['border']}"})
+        for v in shown
+    ])
 
-    return html.Div(rows)
+
+def build_hero(cd: CardData, day_iso: str = None) -> html.Div:
+    """Disco della giornata + verdetto. day_iso: data del DDD (None = l'ultima)."""
+    from models.day_events import build_days
+    from models.planning import build_plan
+    from models.settings import load_settings
+
+    s = load_settings()
+    worked = worked_days(cd)
+    if not worked:
+        return html.Div("Nel file non ci sono giornate con guida o lavoro.",
+                        className="section-card")
+    day_iso = day_iso if day_iso in worked else worked[-1]
+    d0 = date.fromisoformat(day_iso)
+    days = build_days(cd, s, {"card", "place"}, d0, d0)
+    day = days[0] if days else None
+    drive = day.drive if day else 0
+    work = day.work if day else 0
+
+    marks = []                     # carta inserita (verde) / estratta (rossa) sul bordo
+    vrns = []
+    for ln in (day.lines if day else []):
+        if ln.kind != "card":
+            continue
+        minute = int(ln.time[:2]) * 60 + int(ln.time[3:5])
+        inserted = ln.text.startswith("Card In")
+        marks.append((minute, C["accent"] if inserted else C["danger"],
+                      f"{ln.time[:5]} carta {'inserita' if inserted else 'estratta'}"))
+        vrn = ln.text.split("(")[1].split(",")[0]
+        if vrn not in vrns:
+            vrns.append(vrn)
+
+    from models.history import violations_with_history
+    headline, tone, lead = _verdict(violations_with_history(cd), cd)
+    from models.history import history_for
+    plan = build_plan((cd if cd.demo else history_for(cd)).activities, s,
+                      last_download=cd.driver.last_download)
+    if plan:
+        lead += (f" Allo scarico del {plan.reference} può ancora guidare "
+                 f"{_hm(plan.driving[0].left)} in giornata e "
+                 f"{_hm(plan.driving[1].left)} in settimana.")
+
+    i = worked.index(day_iso)
+    title = f"{_WEEKDAYS[d0.weekday()].capitalize()} {d0.day} {_MONTHS[d0.month - 1]} {d0.year}"
+
+    def fact(value, label, small=False):
+        return html.Div([
+            html.Div(value, className="disc-fact-value",
+                     style={"fontSize": "1.2rem"} if small else None),
+            html.Div(label, className="disc-fact-label"),
+        ])
+
+    return html.Div([
+        html.Div(dcc.Graph(
+            figure=tacho_disc(day.segments if day else [], s.colors, marks,
+                              hub_top=_hm(drive), hub_bottom="ore di guida"),
+            config={"displayModeBar": False, "responsive": True},
+            style={"width": "100%", "height": "100%"}), className="disc-figure"),
+        html.Div([
+            html.Div(title, className="disc-day"),
+            html.H2(headline, className=f"disc-verdict disc-verdict--{tone}"),
+            html.P(lead, className="disc-lead"),
+            html.Div([
+                fact(_hm(drive), "di guida"),
+                fact(_hm(work), "di altro lavoro"),
+                fact(f"{(day.km if day else 0):.0f} km", "percorsi"),
+                fact(", ".join(vrns) or "—", "veicolo" if len(vrns) < 2 else "veicoli",
+                     small=True),
+            ], className="disc-facts"),
+            html.Div([html.Span([html.I(style={"background": col}), act])
+                      for act, col in s.colors.items()], className="disc-legend"),
+            html.Div([
+                html.Button("◁ Giorno precedente", id="disc-prev", n_clicks=0,
+                            disabled=i == 0),
+                html.Button("Giorno successivo ▷", id="disc-next", n_clicks=0,
+                            disabled=i == len(worked) - 1),
+                html.Span(f"Giornata {i + 1} di {len(worked)} con attività",
+                          style={"color": C["muted"], "fontSize": "0.86rem"}),
+            ], className="disc-nav"),
+        ]),
+    ], className="disc-hero")
 
 
 def render(cd: CardData) -> html.Div:
-    """
-    Costruisce il layout completo della tab Panoramica.
-
-    Parametro 'cd': oggetto CardData con tutti i dati della carta.
-
-    Struttura del layout (griglia Bootstrap):
-        Riga 1: 4 stat_card (giorni, guida, km, veicoli)
-        Riga 2: semaforo (md=4) | donut (md=5) | top-infrazioni (md=3)
-        Riga 3: bar-chart guida (md=8) | lista veicoli (md=4)
-    """
-    # Calcola i KPI (statistiche aggregate)
     stats = compute_stats(cd)
+    from models.history import violations_with_history
+    viols = violations_with_history(cd)
+    vs = violation_summary(viols)
 
-    # Rileva le infrazioni e crea il riepilogo {severità: conteggio}
-    viols = detect_violations(cd.activities)
-    vs    = violation_summary(viols)
+    def sort_key(v):
+        return v.last_use[6:] + v.last_use[3:5] + v.last_use[:2]
 
-    # ── Riga statistiche (4 card numeriche) ───────────────────────────────────────
-    stat_row = dbc.Row([
-        stat_card("📅", "Giorni totali",   str(stats.get("days", 0))),
-        stat_card("🚛", "Giorni di guida", str(stats.get("driving_days", 0)), C["guida"]),
-        stat_card("⏱", "Ore di guida",    f"{stats.get('driving_h', 0)}h",   C["lavoro"]),
-        # Formato italiano: 123.456 km (punto come separatore migliaia)
-        stat_card("📍", "Km percorsi",
-                  f"{int(stats.get('total_km', 0)):,}".replace(",", "."), C["riposo"]),
-    ], className="g-3 mb-3")   # g-3 = gutter (spazio) tra le colonne, mb-3 = margin-bottom
-
-    # ── Lista veicoli (pannello laterale) ─────────────────────────────────────────
-    vehicles_list = html.Div([
-        # Una riga per veicolo: icona + targa + date
+    vehicles = html.Div([
         html.Div([
-            html.Span("🚛 ", style={"color": C["accent"]}),
-            html.Span(v.vrn, style={"fontFamily": "'DM Mono'", "fontWeight": "600"}),
-            html.Span(f"  {v.first_use} → {v.last_use}",
-                      style={"fontSize": "0.75rem", "color": C["muted"], "marginLeft": "8px"}),
-        ], style={"padding": "6px 0", "borderBottom": f"1px solid {C['border']}"})
-        for v in cd.vehicles
-    # Se non ci sono veicoli, mostra un messaggio placeholder
-    ] or [html.Div("Nessun veicolo", style={"color": C["muted"]})])
+            html.Span(v.vrn, className="vrn-badge"),
+            html.Span(f"{v.first_use} – {v.last_use}",
+                      style={"fontSize": "0.86rem", "color": C["muted"], "marginLeft": "12px"}),
+        ], style={"padding": "7px 0", "borderBottom": f"1px solid {C['border']}"})
+        for v in sorted(cd.vehicles, key=sort_key, reverse=True)[:6]
+    ] or [html.Div("Nessun veicolo nel file", style={"color": C["muted"]})])
 
-    # ── Assemblaggio layout finale ────────────────────────────────────────────────
+    km = f"{int(stats.get('total_km', 0)):,}".replace(",", ".")
+    totals = html.P(
+        f"Il file copre {stats.get('days', 0)} giorni, di cui {stats.get('driving_days', 0)} "
+        f"con guida: {stats.get('driving_h', 0)} ore al volante e {km} km in tutto.",
+        style={"color": C["muted"], "margin": "-4px 4px 16px"})
+
     return html.Div([
-        stat_row,   # riga 1: 4 KPI
-
-        # Riga 2: semaforo + donut + top infrazioni (totale 4+5+3 = 12 colonne Bootstrap)
+        dcc.Store(id="disc-day"),
+        html.Div(build_hero(cd), id="disc-hero-wrap"),
+        totals,
         dbc.Row([
-            dbc.Col(section("Stato conformità", _semaphore(vs)), md=4),
-            dbc.Col(section("Distribuzione ore",
-                # dcc.Graph: widget Plotly; config={"displayModeBar": False} nasconde la toolbar
-                dcc.Graph(figure=donut_hours(stats.get("hours", {})),
-                          config={"displayModeBar": False})), md=5),
-            dbc.Col(section(f"Top infrazioni ({vs['total']} tot.)", _top_violations(viols)), md=3),
-        ], className="g-3 mb-3"),
-
-        # Riga 3: bar-chart guida + veicoli
-        dbc.Row([
-            dbc.Col(section("Ore guida giornaliere (ultimi 14 giorni)",
-                dcc.Graph(figure=bar_daily_driving(cd.activities),
-                          config={"displayModeBar": False})), md=8),
-            dbc.Col(section("Veicoli", vehicles_list), md=4),
+            dbc.Col(section(f"Infrazioni più gravi ({vs['total']} nel file)",
+                            _top_violations(viols)), lg=6),
+            dbc.Col(section("Guida degli ultimi 14 giorni",
+                            dcc.Graph(figure=bar_daily_driving(cd.activities),
+                                      config={"displayModeBar": False})), lg=6),
         ], className="g-3"),
+        section("Veicoli usati di recente", vehicles),
     ])

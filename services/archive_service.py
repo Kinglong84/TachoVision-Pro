@@ -71,6 +71,10 @@ class ArchiveService:
         self.archive_dir = Path(archive_dir) if archive_dir else DEFAULT_ARCHIVE_DIR
         self.archive_dir.mkdir(parents=True, exist_ok=True)
         self._index: List[dict] = self._load_index()
+        try:
+            self._rescan()
+        except Exception:            # l'archivio deve aprirsi comunque
+            pass
 
     # ── Indice ────────────────────────────────────────────────────────────────
     def _index_path(self) -> Path:
@@ -90,6 +94,72 @@ class ArchiveService:
         with open(self._index_path(), "w", encoding="utf-8") as f:
             json.dump(self._index, f, ensure_ascii=False, indent=2)
 
+    def _rescan(self) -> bool:
+        """
+        Riporta nell'indice i file presenti nella cartella ma usciti dall'elenco
+        (es. copie identiche salvate di nuovo: l'indice teneva solo l'ultima).
+        Un contenuto = una voce; la data di scarico è la più vecchia tra le copie
+        (quella nel nome file C_YYYYMMDD_HHMM_…). Nessun file viene cancellato.
+        Ritorna True se l'indice è cambiato.
+        """
+        import re
+        exts = {".ddd", ".esm", ".tgd", ".c1b"}
+        indexed = {Path(d.get("filepath", "")).name for d in self._index}
+        by_sha = {d.get("sha256"): d for d in self._index if d.get("sha256")}
+        changed = False
+
+        def name_date(name: str) -> Optional[datetime]:
+            m = re.match(r"C_(\d{8})_(\d{4})", name)
+            try:
+                return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M") if m else None
+            except ValueError:
+                return None
+
+        for p in sorted(self.archive_dir.iterdir()):
+            if p.suffix.lower() not in exts or not p.is_file():
+                continue
+            try:
+                raw = p.read_bytes()
+            except OSError:
+                continue
+            sha = hashlib.sha256(raw).hexdigest()
+            when = name_date(p.name)
+            entry = by_sha.get(sha)
+            if entry is not None:
+                # copia di un file già in elenco: tiene la data di scarico più vecchia
+                old = None
+                try:
+                    old = datetime.strptime(entry.get("download_date", ""), "%d/%m/%Y %H:%M")
+                except ValueError:
+                    pass
+                if when and (old is None or when < old):
+                    entry["download_date"] = when.strftime("%d/%m/%Y %H:%M")
+                    entry["next_due"] = (when + timedelta(days=28)).strftime("%d/%m/%Y")
+                    changed = True
+                continue
+            if p.name in indexed:
+                continue
+            try:
+                from models.parser import parse_ddd
+                d = parse_ddd(raw).driver
+                name, card = d.full_name, (d.card_number or "").replace(" ", "")
+            except Exception:
+                name, card = "—", "—"
+            when = when or datetime.fromtimestamp(p.stat().st_mtime)
+            entry = ArchiveEntry(
+                filename=p.name, filepath=str(p), card_number=card or "—",
+                driver_name=name or "—", download_date=when.strftime("%d/%m/%Y %H:%M"),
+                next_due=(when + timedelta(days=28)).strftime("%d/%m/%Y"),
+                file_size=len(raw), sha256=sha, source="archivio").to_dict()
+            self._index.append(entry)
+            by_sha[sha] = entry
+            changed = True
+        if changed:
+            self._index.sort(key=lambda d: datetime.strptime(d["download_date"], "%d/%m/%Y %H:%M")
+                             if d.get("download_date") else datetime.min, reverse=True)
+            self._save_index()
+        return changed
+
     # ── Salvataggio file .DDD ─────────────────────────────────────────────────
     def save_ddd(
         self,
@@ -105,16 +175,32 @@ class ArchiveService:
         Il nome file segue la convenzione standard:
             C_YYYYMMDD_HHMM_<cognome>_<numero_carta>.DDD
         """
-        now = datetime.now()
         d   = card_data.driver
+        # data dello scarico = quella della carta (o del nome file),
+        # non l'ora in cui il file viene caricato nell'app
+        try:
+            now = datetime.strptime(d.last_download, "%d/%m/%Y %H:%M")
+        except (TypeError, ValueError):
+            now = datetime.now()
         surname  = (d.surname  or "UNKNOWN").replace(" ", "").upper()[:10]
         card_num = (d.card_number or "0000000000000000").replace(" ", "")[:16]
+        # DDD / ESM / TGD / C1B
+        from models.settings import load_settings
+        ext = {"DDD": ".DDD", "ESM": ".esm", "TGD": ".tgd", "C1B": ".C1B"}.get(
+            load_settings().filetype, ".DDD")
 
         filename = custom_filename or (
             f"C_{now.strftime('%Y%m%d')}_{now.strftime('%H%M')}"
-            f"_{surname}_{card_num}.DDD"
+            f"_{surname}_{card_num}{ext}"
         )
         filepath = self.archive_dir / filename
+
+        # stesso contenuto già in archivio: non si crea una copia con data nuova
+        # (la data di scarico resta quella del primo salvataggio)
+        sha_new = hashlib.sha256(raw_bytes).hexdigest()
+        for e in self._index:
+            if e.get("sha256") == sha_new and Path(e.get("filepath", "")).exists():
+                return ArchiveEntry(**e)
 
         # Scrivi file
         with open(filepath, "wb") as f:
@@ -237,6 +323,112 @@ class ArchiveService:
 
 # ── Singleton (condiviso tra controller e view) ───────────────────────────────
 _archive: Optional[ArchiveService] = None
+
+# ── ──────
+
+def _settings_file():
+    from models.settings import SETTINGS_FILE
+    return SETTINGS_FILE
+
+
+def _manual_dir():
+    from models.manual_data import MANUAL_DIR
+    return MANUAL_DIR
+
+
+def backup_zip(archive: "ArchiveService" = None) -> bytes:
+    """Backup completo: file dell'archivio + indice, dati manuali, impostazioni."""
+    import io
+    import zipfile
+    archive = archive or get_archive()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in archive.archive_dir.glob("*"):
+            if p.is_file():
+                z.write(p, f"archivio/{p.name}")
+        md = _manual_dir()
+        if md.exists():
+            for p in md.glob("*.json"):
+                z.write(p, f"manuale/{p.name}")
+        sf = _settings_file()
+        if sf.exists():
+            z.write(sf, "impostazioni.json")
+    return buf.getvalue()
+
+
+def archive_zip(archive: "ArchiveService" = None, card_number: str = None) -> bytes:
+    """solo i file tachigrafo (eventualmente di un conducente)."""
+    import io
+    import zipfile
+    archive = archive or get_archive()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for e in archive.list_entries():
+            if card_number and e.card_number != card_number:
+                continue
+            p = Path(e.filepath)
+            if p.exists():
+                z.write(p, p.name)
+    return buf.getvalue()
+
+
+def restore_zip(data: bytes, archive: "ArchiveService" = None,
+                restore_settings: bool = True) -> Dict[str, int]:
+    """
+    Ripristina un backup creato da backup_zip(): aggiunge i file all'archivio
+    (senza cancellare quelli presenti), i dati manuali e le impostazioni.
+    I nomi dei file vengono ripuliti (nessun percorso esterno alla cartella).
+    """
+    import io
+    import json
+    import zipfile
+    archive = archive or get_archive()
+    counts = {"file": 0, "manuali": 0, "impostazioni": 0}
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        index_data = None
+        for info in z.infolist():
+            if info.is_dir():
+                continue
+            name = Path(info.filename).name                  # niente "../"
+            if info.filename.startswith("archivio/"):
+                if name == METADATA_FILE:
+                    index_data = json.loads(z.read(info).decode("utf-8"))
+                    continue
+                (archive.archive_dir / name).write_bytes(z.read(info))
+                counts["file"] += 1
+            elif info.filename.startswith("manuale/") and name.endswith(".json"):
+                md = _manual_dir()
+                md.mkdir(parents=True, exist_ok=True)
+                (md / name).write_bytes(z.read(info))
+                counts["manuali"] += 1
+            elif name == "impostazioni.json" and restore_settings:
+                sf = _settings_file()
+                sf.parent.mkdir(parents=True, exist_ok=True)
+                sf.write_bytes(z.read(info))
+                counts["impostazioni"] = 1
+        if index_data:
+            known = {e.get("sha256") for e in archive._index}
+            for e in index_data:
+                if e.get("sha256") not in known:
+                    e["filepath"] = str(archive.archive_dir / Path(e.get("filename", "")).name)
+                    archive._index.append(e)
+            archive._save_index()
+    return counts
+
+
+def delete_all(card_number: str = None, archive: "ArchiveService" = None) -> int:
+    """tutti i file (o di un conducente) + dati manuali."""
+    from models.manual_data import delete_all as delete_manual
+    archive = archive or get_archive()
+    n = 0
+    for e in list(archive.list_entries()):
+        if card_number and e.card_number != card_number:
+            continue
+        if archive.delete(e.filename):
+            n += 1
+    delete_manual(card_number)
+    return n
+
 
 def get_archive(archive_dir: Optional[str] = None) -> ArchiveService:
     global _archive

@@ -262,6 +262,112 @@ def mini_gantt(changes: list, date_str: str, tz_offset_min: int = 0) -> go.Figur
     return fig
 
 
+def day_gantt(segments: list, colors: dict, height: int = 70) -> go.Figure:
+    """
+    Gantt di un giorno locale (00:00 → 24:00) dai segmenti di models/day_events.
+
+    Le attività sono su 4 livelli : Guida in alto,
+    Riposo in basso; i colori seguono la palette scelta nelle impostazioni.
+    """
+    levels = {"Guida": 3, "Lavoro": 2, "Disponibilità": 1, "Riposo": 0}
+    traces = []
+    for s0, s1, act in segments:
+        if s1 <= s0:
+            continue
+        lv = levels.get(act, 0)
+        traces.append(go.Bar(
+            x=[(s1 - s0) / 60], y=[lv + 1], base=[s0 / 60], orientation="h",
+            marker=dict(color=colors.get(act, "#888"), line=dict(width=0)),
+            width=0.5 + lv * 0.15, showlegend=False,
+            hovertemplate=(f"<b>{act}</b><br>{s0 // 60:02d}:{s0 % 60:02d}→"
+                           f"{s1 // 60:02d}:{s1 % 60:02d} ({(s1 - s0) // 60}h"
+                           f"{(s1 - s0) % 60:02d})<extra></extra>"),
+        ))
+    fig = go.Figure(traces)
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.04)",
+        barmode="overlay", height=height, margin=dict(l=0, r=0, t=0, b=22),
+        xaxis=dict(range=[0, 24], tickvals=list(range(0, 25, 3)),
+                   ticktext=[f"{h:02d}:00" for h in range(0, 25, 3)],
+                   gridcolor=C["border"], zeroline=False,
+                   tickfont=dict(size=8, color=C["muted"])),
+        yaxis=dict(visible=False, range=[0.4, 4.8]),
+        hoverlabel=dict(bgcolor=C["card"], font=dict(color=C["text"])),
+    )
+    return fig
+
+
+def tacho_disc(segments: list, colors: dict, marks: list = None,
+               hub_top: str = "", hub_bottom: str = "") -> go.Figure:
+    """
+    Il disco del cronotachigrafo analogico per una giornata (ora locale).
+
+    Come sui dischi reali: 24 ore in senso orario con la mezzanotte in alto,
+    la puntina segna ogni attività su un anello diverso (la guida è l'anello
+    più esterno e più largo, il riposo il più interno e sottile).
+
+    segments: [(minuto_inizio, minuto_fine, attività)] (0-1440, da day_events)
+    marks:    [(minuto, colore, testo)] segni sul bordo (carta inserita/estratta)
+    hub_*:    testi al centro del disco
+    """
+    rings = {  # attività → (raggio interno, spessore) su una scala 0-1
+        "Guida":         (0.74, 0.22),
+        "Lavoro":        (0.62, 0.10),
+        "Disponibilità": (0.53, 0.07),
+        "Riposo":        (0.46, 0.04),
+    }
+    fig = go.Figure()
+    for act, (base, width) in rings.items():
+        segs = [(a, b) for a, b, x in segments if x == act and b > a]
+        if not segs:
+            continue
+        fig.add_trace(go.Barpolar(
+            r=[width] * len(segs), base=[base] * len(segs),
+            theta=[(a + b) / 2 / 4 for a, b in segs],          # 1440 min → 360°
+            width=[(b - a) / 4 for a, b in segs],
+            marker=dict(color=colors.get(act, "#888"), line=dict(width=0)),
+            name=act, opacity=0.95,
+            customdata=[[f"{a // 60:02d}:{a % 60:02d}", f"{b // 60:02d}:{b % 60:02d}",
+                         f"{(b - a) // 60}h{(b - a) % 60:02d}"] for a, b in segs],
+            hovertemplate=f"<b>{act}</b><br>%{{customdata[0]}} → %{{customdata[1]}}"
+                          f" (%{{customdata[2]}})<extra></extra>",
+        ))
+    if marks:
+        fig.add_trace(go.Scatterpolar(
+            r=[1.0] * len(marks), theta=[m / 4 for m, _, _ in marks], mode="markers",
+            marker=dict(symbol="triangle-down", size=11, color=[c for _, c, _ in marks],
+                        line=dict(width=0)),
+            text=[t for _, _, t in marks], hovertemplate="%{text}<extra></extra>",
+            showlegend=False,
+        ))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", showlegend=False,
+        margin=dict(l=34, r=34, t=34, b=34), height=None,
+        font=dict(family="'Overpass', sans-serif", color=C["text"]),
+        polar=dict(
+            bgcolor="rgba(0,0,0,0)", hole=0.30,
+            radialaxis=dict(range=[0, 1.02], visible=False),
+            angularaxis=dict(
+                rotation=90, direction="clockwise", period=360,
+                tickvals=[h * 15 for h in range(24)],
+                ticktext=[str(h if h else 24) for h in range(24)],
+                tickfont=dict(size=12, color=C["text"]),
+                gridcolor="rgba(35,39,44,0.10)", linecolor="rgba(35,39,44,0.35)",
+                ticks="outside", ticklen=6, tickcolor="rgba(35,39,44,0.45)",
+            ),
+        ),
+        annotations=[
+            dict(text=f"<b>{hub_top}</b>", x=0.5, y=0.53, xref="paper", yref="paper",
+                 showarrow=False, font=dict(size=30, color=C["text"])),
+            dict(text=hub_bottom, x=0.5, y=0.43, xref="paper", yref="paper",
+                 showarrow=False, font=dict(size=13, color=C["muted"])),
+        ],
+        hoverlabel=dict(bgcolor="#FFFFFF", bordercolor=C["border"],
+                        font=dict(color=C["text"])),
+    )
+    return fig
+
+
 def bar_weekly(weekly: list) -> go.Figure:
     """
     Bar chart con guida + lavoro totale per settimana (tab Riepilogo).

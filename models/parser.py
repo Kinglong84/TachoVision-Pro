@@ -125,11 +125,22 @@ ACTIVITY_MAP = {0: "Riposo", 1: "Disponibilità", 2: "Lavoro", 3: "Guida"}
 # Tabella di conversione: codice numerico EU → codice ISO 3166-1 alpha-2 (sigla nazione).
 # Definita nella spec EU Annex 1B §3.1 (NationNumeric). Valori 1-28 = stati UE storici;
 # 56 e 57 = Svizzera e Norvegia (paesi SEE non-UE che hanno adottato il tachigrafo).
+# NationNumeric (Reg. 3821/85 All. 1B e Reg. 2016/799 All. 1C) → ISO alpha-2.
+# La vecchia tabella era in ordine alfabetico EU e sbagliata (26 = Italia, non
+# Slovenia): verificato su un file reale di prova
+# (26 = Italia, 39 = Portogallo, 40 = Polonia).
 EU_NATIONS: Dict[int, str] = {
-    1:"AT",2:"BE",3:"BG",4:"CY",5:"CZ",6:"DE",7:"DK",8:"EE",
-    9:"ES",10:"FI",11:"FR",12:"GR",13:"HR",14:"HU",15:"IE",16:"IT",
-    17:"LT",18:"LU",19:"LV",20:"MT",21:"NL",22:"PL",23:"PT",24:"RO",
-    25:"SE",26:"SI",27:"SK",28:"GB",56:"CH",57:"NO",
+    0x01: "AT", 0x02: "AL", 0x03: "AD", 0x04: "AM", 0x05: "AZ", 0x06: "BE",
+    0x07: "BG", 0x08: "BA", 0x09: "BY", 0x0A: "CH", 0x0B: "CY", 0x0C: "CZ",
+    0x0D: "DE", 0x0E: "DK", 0x0F: "ES", 0x10: "EE", 0x11: "FR", 0x12: "FI",
+    0x13: "LI", 0x14: "FO", 0x15: "GB", 0x16: "GE", 0x17: "GR", 0x18: "HU",
+    0x19: "HR", 0x1A: "IT", 0x1B: "IE", 0x1C: "IS", 0x1D: "KZ", 0x1E: "LU",
+    0x1F: "LT", 0x20: "LV", 0x21: "MT", 0x22: "MC", 0x23: "MD", 0x24: "MK",
+    0x25: "NO", 0x26: "NL", 0x27: "PT", 0x28: "PL", 0x29: "RO", 0x2A: "SM",
+    0x2B: "RU", 0x2C: "SE", 0x2D: "SK", 0x2E: "SI", 0x2F: "TM", 0x30: "TR",
+    0x31: "UA", 0x32: "VA", 0x33: "YU", 0x34: "ME", 0x35: "RS", 0x36: "UZ",
+    0x37: "TJ", 0x38: "KG",
+    0xFD: "EC", 0xFE: "EUR", 0xFF: "WLD",
 }
 
 # Range di validità per timestamp Unix (secondi dal 1970-01-01):
@@ -368,13 +379,14 @@ _FAULT_SLOT_CODES = [0x10, 0x11]
 
 # EF_SPECIFIC_CONDITIONS: condizioni operative speciali che sospendono la registrazione normale.
 # Es: traghetto o treno — il conducente non guida ma il veicolo si muove, i tempi non contano.
+# SpecificConditionType (Annex 1B/1C): 1/2 fuori ambito
+# inizio/fine, 3/4 traghetto o treno inizio/fine (Gen1 registra solo l'inizio).
 SPECIFIC_CONDITION_NAMES: Dict[int, str] = {
-    0x00: "Normale",                        # condizione operativa standard
-    0x01: "Fuori ambito (traghetto/treno)", # in transito su mezzo di trasporto
-    0x02: "Inizio condizione speciale",     # inizio di un'attività fuori ambito
-    0x03: "Fine condizione speciale",       # fine di un'attività fuori ambito
-    0x04: "Inizio traghetto/treno",         # sinonimo specifico per mezzo di trasporto
-    0x05: "Fine traghetto/treno",           # fine del transito
+    0x00: "Normale",                        # RFU
+    0x01: "Inizio fuori ambito",            # Out of scope - Begin
+    0x02: "Fine fuori ambito",              # Out of scope - End
+    0x03: "Inizio traghetto/treno",         # Ferry/Train crossing (- Begin)
+    0x04: "Fine traghetto/treno",           # Ferry/Train crossing - End
 }
 
 
@@ -428,6 +440,21 @@ def _decode_identification(data: bytes) -> DriverInfo:
     d.birth_date = _bcd_date(rd(4))   # 4 byte BCD YYYYMMDD (vedi _bcd_date)
     d.language   = _str(rd(2))        # 2 caratteri ISO 639-1 (es. "IT", "DE")
     return d
+
+
+def _make_change(aci: int, minute: int, activity: str) -> ActivityChange:
+    """
+    Crea un ActivityChange dai bit di stato dell'ACI (Annex 1B/1C, 'scpaattttttttttt'):
+      bit 13 'p' = stato carta: 0 inserita, 1 non inserita
+      bit 14 'c' = con carta inserita: 0 solo, 1 equipaggio;
+                   con carta non inserita: 0 sconosciuta, 1 inserita a mano
+    """
+    inserted = not ((aci >> 13) & 1)
+    c = bool((aci >> 14) & 1)
+    return ActivityChange(time=minute, activity=activity,
+                          manual=c and not inserted,
+                          crew=c and inserted,
+                          card_inserted=inserted)
 
 
 def _decode_activities_gen1(data: bytes) -> List[DayActivity]:
@@ -530,10 +557,7 @@ def _decode_activities_gen1(data: bytes) -> List[DayActivity]:
                     continue   # bit 15 = 1: co-conducente, ignora
                 m = aci & 0x7FF         # bit 10-0: minuti dall'inizio giornata (11 bit)
                 if m < 1440:            # 1440 = 24*60: scarta valori impossibili
-                    changes.append(ActivityChange(
-                        time=m,
-                        activity=ACTIVITY_MAP[(aci >> 11) & 3],  # bit 12-11: tipo attività
-                        manual=bool((aci >> 14) & 1)))            # bit 14: inserimento manuale
+                    changes.append(_make_change(aci, m, ACTIVITY_MAP[(aci >> 11) & 3]))
 
             if changes:
                 records_raw.append((dpc, DayActivity(
@@ -650,10 +674,7 @@ def _decode_activities_v2(data: bytes) -> List[DayActivity]:
             if m < 1440:
                 # Ottimizzazione Gen2: salta duplicati consecutivi (stesso minuto, stessa attività)
                 if not changes or m > changes[-1].time or ACTIVITY_MAP[at] != changes[-1].activity:
-                    changes.append(ActivityChange(
-                        time=m,
-                        activity=ACTIVITY_MAP[at],
-                        manual=bool((aci >> 14) & 1)))
+                    changes.append(_make_change(aci, m, ACTIVITY_MAP[at]))
 
         # Usa il timestamp LOCALE per la data (d_local, non d_utc):
         # in Italia (UTC+2 estate), mezzanotte locale = 22:00 UTC del giorno precedente.
@@ -1009,7 +1030,8 @@ def _decode_places(data: bytes, is_gen2: bool = False) -> List[Place]:
 
     STRUTTURA RECORD GEN1 (10 byte):
       offset 0-3: ts (4 byte Unix UTC)    → data/ora di inserimento/rimozione carta
-      offset 4:   entry_type (1 byte)     → 1 = INIZIO, 0 = FINE
+      offset 4:   entry_type (1 byte)     → EntryTypeDailyWorkPeriod: 0 = inizio,
+                                            1 = fine, 2/3 = inizio/fine inseriti a mano
       offset 5:   country (1 byte)        → codice nazione EU (tabella EU_NATIONS)
       offset 6:   region (1 byte)         → codice regione (mappa EU interna, non usato)
       offset 7-9: odometer (3 byte, km)   → lettura odometro al momento
@@ -1058,7 +1080,7 @@ def _decode_places(data: bytes, is_gen2: bool = False) -> List[Place]:
             break   # record troncato: fine dei dati
 
         ts     = _ts(data, o)           # timestamp: 4 byte Unix UTC
-        et     = data[o + 4]            # entry_type: 1=Inizio, altro=Fine
+        et     = data[o + 4]            # entry_type: 0/2 = Inizio, 1/3 = Fine
         nat    = data[o + 5]            # codice nazione EU (1-57)
         region = data[o + 6]            # codice regione (non mappato in UI corrente)
         odo    = int.from_bytes(data[o + 7: o + 10], "big")   # odometro in km
@@ -1087,16 +1109,19 @@ def _decode_places(data: bytes, is_gen2: bool = False) -> List[Place]:
             datetime=ts.strftime("%d/%m/%Y %H:%M"),
             date=ts.strftime("%Y-%m-%d"),
             country=EU_NATIONS.get(nat, f"?{nat}"),   # "?57" se nazione sconosciuta
-            entry_type="Inizio" if et == 1 else "Fine",
+            entry_type="Inizio" if et in (0, 2) else "Fine",   # verificato su file reale: 0 = inserimento carta
             odometer_km=odo,
             region=region,
             gnss_lat=gnss_lat,
             gnss_lon=gnss_lon,
             gnss_accuracy=gnss_acc,
+            ts_utc=int(ts.timestamp()),
+            manual=et in (2, 3),
         ))
 
     # Ordina per data decrescente: i luoghi più recenti prima
-    return sorted(places, key=lambda p: p.date, reverse=True)
+    # ordine per data e ora (non solo data: più luoghi nello stesso giorno)
+    return sorted(places, key=lambda p: (p.date, p.datetime[11:]), reverse=True)
 
 
 def _decode_events(data: bytes, is_gen2: bool = False) -> List[CardEvent]:

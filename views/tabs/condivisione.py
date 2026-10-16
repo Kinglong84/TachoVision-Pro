@@ -30,7 +30,7 @@ PROVIDER CLOUD SUPPORTATI:
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
-from views.theme import C, btn_style
+from views.theme import C, btn_style, btn_outline
 from views.components import section
 
 
@@ -100,7 +100,7 @@ def _provider_card(name: str, authenticated: bool, note: str = "") -> html.Div:
             "🔓 Disconnetti" if authenticated else "🔗 Connetti account",
             id={"type": "btn-cloud-auth", "index": name},
             n_clicks=0,
-            style={**btn_style(C["muted"] if authenticated else color),
+            style={**btn_outline(C["muted"] if authenticated else color),
                    "width": "100%", "marginBottom": "8px"},
         ),
 
@@ -111,7 +111,7 @@ def _provider_card(name: str, authenticated: bool, note: str = "") -> html.Div:
             id={"type": "btn-cloud-upload", "index": name},
             n_clicks=0,
             disabled=not authenticated,   # disabilita se non connesso
-            style={**btn_style(color),
+            style={**btn_outline(color),
                    "width": "100%",
                    "opacity": "1" if authenticated else "0.35",     # semi-trasparente se disabilitato
                    "cursor": "pointer" if authenticated else "not-allowed"},
@@ -169,7 +169,7 @@ def render(cd=None) -> html.Div:
                 # Label piccola sopra l'input (stile "micro-label")
                 html.Div("Destinatari (opzionale — separati da virgola)",
                          style={"fontSize": "0.72rem", "color": C["muted"],
-                                "textTransform": "uppercase", "letterSpacing": "1px",
+                                "fontWeight": "700",
                                 "marginBottom": "6px"}),
                 # Campo testo per i destinatari
                 # value=...: pre-popola con i destinatari salvati nelle impostazioni
@@ -181,7 +181,7 @@ def render(cd=None) -> html.Div:
                         "width": "100%", "background": C["surface"],
                         "border": f"1px solid {C['border']}", "color": C["text"],
                         "borderRadius": "6px", "padding": "9px 12px",
-                        "fontSize": "0.82rem", "fontFamily": "'DM Mono', monospace",
+                        "fontSize": "0.82rem", "fontFamily": "'Overpass'",
                         "marginBottom": "6px",
                     },
                 ),
@@ -199,7 +199,7 @@ def render(cd=None) -> html.Div:
             dbc.Col([
                 html.Div("File da allegare",
                          style={"fontSize": "0.72rem", "color": C["muted"],
-                                "textTransform": "uppercase", "letterSpacing": "1px",
+                                "fontWeight": "700",
                                 "marginBottom": "8px"}),
                 # Checklist Dash: l'utente seleziona quali file allegare all'email.
                 # options: lista di {"label": ..., "value": ...}
@@ -282,7 +282,7 @@ def render(cd=None) -> html.Div:
         html.Div([
             html.Div("Token Dropbox (Personal Access Token da dropbox.com/developers)",
                      style={"fontSize": "0.72rem", "color": C["muted"],
-                            "textTransform": "uppercase", "letterSpacing": "1px",
+                            "fontWeight": "700",
                             "marginBottom": "6px"}),
             dbc.Row([
                 # Input per il token (tipo password: testo nascosto)
@@ -292,10 +292,10 @@ def render(cd=None) -> html.Div:
                                           "border": f"1px solid {C['border']}",
                                           "color": C["text"], "borderRadius": "6px",
                                           "padding": "8px 12px", "fontSize": "0.82rem",
-                                          "fontFamily": "'DM Mono', monospace"}), md=9),
+                                          "fontFamily": "'Overpass'"}), md=9),
                 # Pulsante salva token
                 dbc.Col(html.Button("✅ Salva", id="btn-dropbox-token", n_clicks=0,
-                                     style=btn_style("#0061FF")), md=3),
+                                     style=btn_outline("#0061FF")), md=3),
             ], className="g-2"),
             # Feedback al salvataggio del token
             html.Div(id="dropbox-token-result",

@@ -15,34 +15,40 @@ Concetti chiave:
 """
 
 
-# ── Palette colori dark ───────────────────────────────────────────────────────────
-# C è il dizionario principale dei colori. Tutti i componenti vi accedono tramite
-# chiave semantica (es. C["guida"] invece di "#EF4444") così un cambio di colore
-# si fa in un solo posto.
+# ── Palette "Carta disco" ─────────────────────────────────────────────────────────
+# Identità visiva: il disco del cronotachigrafo analogico (carta cerata grigio-verde,
+# inchiostro della puntina) e la segnaletica stradale italiana (verde autostrada,
+# blu delle strade statali, giallo cantiere, rosso divieto).
+# C è il dizionario principale dei colori: i componenti vi accedono per chiave
+# semantica, così un cambio di colore si fa in un solo posto.
+FONT = "'Overpass', 'Segoe UI', sans-serif"   # derivato dal Highway Gothic dei cartelli
+
 C = {
-    # Sfondi (dal più scuro al più chiaro)
-    "bg":      "#070B14",   # sfondo principale della pagina (quasi nero blu)
-    "surface": "#0D1424",   # sfondo pannelli (leggermente più chiaro)
-    "card":    "#111C30",   # sfondo card/blocchi interni
-    "border":  "#1E2D45",   # colore bordi e divisori
+    # Fondi
+    "bg":      "#E8EBE6",   # carta del disco: grigio-verde freddo
+    "surface": "#F6F7F4",   # pannelli
+    "card":    "#FFFFFF",   # blocchi interni (righe, voci)
+    "border":  "#C9CFC7",   # filetti e bordi
 
     # Testi
-    "text":    "#E2EAF4",   # testo principale (bianco blu)
-    "muted":   "#5A7A9B",   # testo secondario/attenuato (grigio blu)
+    "text":    "#23272C",   # inchiostro
+    "muted":   "#5E666D",   # testo secondario (contrasto ≥ 4.5:1 sulla carta)
 
-    # Colore accentuativo principale (ciano/azzurro)
-    "accent":  "#00C2FF",
+    # Accento: verde dei cartelli autostradali
+    "accent":  "#00653A",
+    "info":    "#1D4F91",   # blu delle strade statali
 
-    # Colori per le 4 attività del tachigrafo
-    "guida":   "#EF4444",   # rosso acceso — Guida (l'attività più regolamentata)
-    "lavoro":  "#3B82F6",   # blu — Lavoro (es. carico/scarico)
-    "disp":    "#F59E0B",   # arancione/giallo — Disponibilità (attesa)
-    "riposo":  "#10B981",   # verde — Riposo
+    # Colori per le 4 attività (grafici legacy; i grafici nuovi usano la palette
+    # scelta nelle impostazioni)
+    "guida":   "#B3261E",
+    "lavoro":  "#1D4F91",
+    "disp":    "#B07A00",
+    "riposo":  "#00653A",
 
-    # Alias semantici (usati nei componenti per chiarezza)
-    "success": "#10B981",   # verde (stesso del riposo)
-    "warning": "#F59E0B",   # arancione (stesso della disponibilità)
-    "danger":  "#EF4444",   # rosso (stesso della guida)
+    # Stati
+    "success": "#00653A",   # verde autostrada
+    "warning": "#B07A00",   # giallo cantiere (versione scura, leggibile su carta)
+    "danger":  "#C1121F",   # rosso divieto
 }
 
 
@@ -96,6 +102,7 @@ SIDEBAR_GROUPS = [
     ]),
     ("Gestione", [
         ("condivisione", "📤", "Report & Export"),  # tab email/cloud/export
+        ("impostazioni", "⚙️", "Impostazioni"),
     ]),
 ]
 
@@ -123,7 +130,7 @@ def card_style(**extra):
     return {
         "background": C["card"],
         "border": f"1px solid {C['border']}",
-        "borderRadius": "10px",    # angoli arrotondati
+        "borderRadius": "6px",
         "padding": "20px",
         "marginBottom": "16px",    # spazio sotto ogni card
         **extra,                   # eventuali sovrascritture/aggiuntive
@@ -135,7 +142,8 @@ def muted_text_style(size="0.78rem"):
 
 def mono_style(size="0.82rem"):
     """Stile per testo monospaced (numeri, codici, timestamp)."""
-    return {"fontFamily": "'DM Mono', monospace", "fontSize": size}
+    # numeri tabellari dello stesso carattere (niente monospace)
+    return {"fontFamily": FONT, "fontSize": size, "fontVariantNumeric": "tabular-nums"}
 
 def badge_style(color: str):
     """
@@ -147,8 +155,8 @@ def badge_style(color: str):
     - testo:  colore pieno (100%)
     """
     return {
-        "background": color + "22",          # sfondo semitrasparente
-        "border": f"1px solid {color}55",    # bordo parzialmente trasparente
+        "background": color + "18",          # sfondo semitrasparente
+        "border": f"1px solid {color}66",    # bordo parzialmente trasparente
         "color": color,                       # testo nel colore pieno
         "padding": "2px 10px",
         "borderRadius": "4px",
@@ -166,15 +174,32 @@ def btn_style(color: str = None):
     """
     color = color or C["accent"]
     return {
-        "background": color + "22",          # sfondo al 13% di opacità
-        "border": f"1px solid {color}44",    # bordo al 27% di opacità
-        "color": color,
-        "borderRadius": "8px",
-        "padding": "9px 14px",
+        "background": color,                 # pulsante pieno, come un pannello segnaletico
+        "border": f"1px solid {color}",
+        "color": "#FFFFFF",
+        "borderRadius": "4px",
+        "padding": "8px 14px",
         "cursor": "pointer",                 # cursore a mano al passaggio del mouse
-        "fontSize": "0.82rem",
-        "fontFamily": "'Space Grotesk', sans-serif",
+        "fontSize": "0.86rem",
+        "fontWeight": "700",
+        "fontFamily": FONT,
         "whiteSpace": "nowrap",
+    }
+
+
+def btn_outline(color: str):
+    """Pulsante con contorno nel colore dato (servizi esterni: Google, Microsoft…)."""
+    return {**btn_ghost(), "border": f"1.5px solid {color}", "color": color,
+            "background": "#FFFFFF"}
+
+
+def btn_ghost():
+    """Pulsante secondario: contorno sottile, testo inchiostro (azioni non primarie)."""
+    return {
+        "background": C["surface"], "border": f"1px solid {C['border']}",
+        "color": C["text"], "borderRadius": "4px", "padding": "7px 12px",
+        "cursor": "pointer", "fontSize": "0.84rem", "fontWeight": "600",
+        "fontFamily": FONT, "whiteSpace": "nowrap",
     }
 
 
@@ -195,10 +220,10 @@ def plotly_base(**overrides) -> dict:
     base = dict(
         paper_bgcolor="rgba(0,0,0,0)",   # sfondo del "foglio" Plotly: trasparente
         plot_bgcolor="rgba(0,0,0,0)",    # sfondo dell'area del grafico: trasparente
-        font=dict(family="'DM Mono', monospace", color=C["text"], size=11),
+        font=dict(family=FONT, color=C["text"], size=12),
         hoverlabel=dict(
-            bgcolor="#111C30",                       # sfondo tooltip
-            bordercolor="rgba(0,194,255,0.3)",       # bordo tooltip (ciano traslucido)
+            bgcolor="#FFFFFF",                       # sfondo tooltip
+            bordercolor=C["border"],
             font=dict(color=C["text"], size=11),
             align="left",
         ),
@@ -248,7 +273,6 @@ def axis_style(**extra) -> dict:
 EXTERNAL_STYLESHEETS = [
     # Bootstrap 5.3: framework CSS per il layout a griglia e componenti base
     "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css",
-    # Google Fonts: DM Mono (monospaced per numeri/codici) e Space Grotesk (sans-serif principale)
-    "https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500"
-    "&family=Space+Grotesk:wght@300;400;600;700&display=swap",
+    # Google Fonts: Overpass (ispirato alla segnaletica stradale)
+    "https://fonts.googleapis.com/css2?family=Overpass:wght@400;500;600;700;800;900&display=swap",
 ]

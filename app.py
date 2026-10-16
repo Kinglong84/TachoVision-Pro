@@ -36,7 +36,7 @@ from dash import dcc, html
 # dcc = Dash Core Components: componenti interattivi (Input, Upload, Graph, Store, ecc.)
 # html = Componenti HTML Dash: rappresentano tag HTML (Div, Span, Button, ecc.)
 
-from views.theme import C, btn_style, EXTERNAL_STYLESHEETS
+from views.theme import C, btn_style, btn_ghost, EXTERNAL_STYLESHEETS
 # C = dizionario con i colori dell'app (palette dark)
 # btn_style = funzione che genera stili CSS per i bottoni
 # EXTERNAL_STYLESHEETS = lista di URL di fogli di stile esterni (Bootstrap, Google Fonts)
@@ -70,7 +70,12 @@ app.layout = html.Div([
     dcc.Store(id="store-archive"),              # segnale per aggiornare l'archivio locale
     dcc.Store(id="store-archive-selected", data=[]),  # file selezionati per export
     dcc.Store(id="store-card-status"),         # stato lettore (per polling)
+    # controllo del lettore ogni 3 s
+    dcc.Interval(id="card-poll", interval=3000, n_intervals=0),
     dcc.Store(id="store-gnss-date", data=None),  # data filtro mappa GPS (YYYY-MM-DD)
+    dcc.Store(id="store-settings"),            # impostazioni salvate (aggiornato al salvataggio)
+    dcc.Store(id="store-manual-rev", data=0),
+    dcc.Store(id="store-wt-view"),             # vista del Riepilogo usata dall'export Excel/PDF  # cambia quando si modificano i dati manuali
 
     # ── Download invisibili (dcc.Download) ────────────────────────────────────────
     # dcc.Download triggera il download di un file nel browser quando viene "riempito"
@@ -80,6 +85,7 @@ app.layout = html.Div([
     dcc.Download(id="download-pdf-viol"),    # scarica il PDF delle infrazioni
     dcc.Download(id="download-pdf-week"),    # scarica il PDF del riepilogo settimanale
     dcc.Download(id="download-ddd-file"),    # scarica file .DDD dall'archivio
+    dcc.Download(id="download-report"),      # report PDF/Excel delle tab (report_controller)
 
     # ── Header superiore (barra fissa) ────────────────────────────────────────────
     # La barra in cima alla pagina, visibile sempre (CSS: position: sticky).
@@ -90,7 +96,7 @@ app.layout = html.Div([
             html.Span("🚛", style={"fontSize": "1.4rem"}),
             # "DM Mono" è un font monospaced (larghezza fissa per ogni carattere)
             html.Span("TACHOVISION",
-                      style={"fontFamily": "'DM Mono'", "fontWeight": "500"}),
+                      style={"fontFamily": "'Overpass'", "fontWeight": "500"}),
             # Badge "PRO" con colore accent semitrasparente
             html.Span("PRO", style={
                 "background": C["accent"] + "22",   # colore + "22" = 13% opacità (hex)
@@ -159,7 +165,7 @@ app.layout = html.Div([
                     "color": C["muted"], "display": "flex",
                     "alignItems": "center", "gap": "6px",
                 }),
-                accept=".ddd,.DDD",          # solo file con estensione .ddd o .DDD
+                accept=".ddd,.DDD,.esm,.ESM,.tgd,.TGD,.c1b,.C1B",  # DDD, ESM, TGD, C1B
                 max_size=50 * 1024 * 1024,   # dimensione massima: 50 MB
             ),
 
@@ -168,13 +174,13 @@ app.layout = html.Div([
             # tramite callback e triggherano il download corrispondente.
             html.Div([
                 html.Button("📥 CSV",            id="btn-csv",       n_clicks=0,
-                            style=btn_style(C["accent"])),
+                            style=btn_ghost()),
                 html.Button("📄 PDF Attività",   id="btn-pdf-act",   n_clicks=0,
-                            style=btn_style("#C084FC")),    # viola
+                            style=btn_ghost()),
                 html.Button("📄 PDF Infrazioni", id="btn-pdf-viol",  n_clicks=0,
-                            style=btn_style("#C084FC")),
+                            style=btn_ghost()),
                 html.Button("📄 PDF Riepilogo",  id="btn-pdf-week",  n_clicks=0,
-                            style=btn_style("#C084FC")),
+                            style=btn_ghost()),
             ], style={"display": "flex", "gap": "6px"}),
 
         ], style={"display": "flex", "gap": "10px",
@@ -209,7 +215,7 @@ app.layout = html.Div([
     "minHeight": "100vh",    # l'app occupa almeno tutta l'altezza della finestra
     "background": C["bg"],   # sfondo scuro della palette
     "color": C["text"],      # colore testo predefinito
-    "fontFamily": "'Space Grotesk', sans-serif",   # font principale dell'app
+    "fontFamily": "'Overpass'",   # font principale dell'app
 })
 
 
@@ -218,7 +224,7 @@ app.layout = html.Div([
 # Un "callback" è una funzione Python che viene chiamata automaticamente
 # ogni volta che un componente cambia (click, input, ecc.).
 # 'register(app)' passa l'istanza Dash al controller che vi attacca i callback.
-from controllers import render_controller, nav_controller, export_controller, archive_controller, share_controller, gps_controller
+from controllers import render_controller, nav_controller, export_controller, archive_controller, share_controller, gps_controller, settings_controller, violations_controller, rest_controller, planning_controller, worktime_controller, activities_controller, manual_controller, vehicle_controller, report_controller, archive_tools_controller
 
 render_controller.register(app)    # gestisce rendering tab e upload
 nav_controller.register(app)       # gestisce click sui bottoni sidebar
@@ -226,6 +232,30 @@ export_controller.register(app)    # gestisce download CSV e PDF
 archive_controller.register(app)   # gestisce archivio file DDD locali
 share_controller.register(app)     # gestisce invio email e upload cloud
 gps_controller.register(app)       # gestisce navigazione interattiva mappa GPS
+settings_controller.register(app)  # gestisce salvataggio impostazioni
+violations_controller.register(app)  # filtri della tab Infrazioni
+rest_controller.register(app)        # filtro periodo della tab Riposo
+planning_controller.register(app)    # macchina del tempo della Pianificazione
+worktime_controller.register(app)    # menu della tab Riepilogo
+activities_controller.register(app)  # menu della tab Attività
+manual_controller.register(app)      # note, ferie, attività manuali
+vehicle_controller.register(app)     # menu della tab Veicoli
+report_controller.register(app)      # barre PDF/EXCEL delle tab
+archive_tools_controller.register(app)  # backup, ripristino, zip, cancella tutto
+from controllers import dashboard_controller
+dashboard_controller.register(app)   # disco della Dashboard
+
+
+# ── ─────────────────────
+def _startup_backup():
+    try:
+        from services.accessories import auto_backup_if_due
+        auto_backup_if_due()
+    except Exception as e:   # il backup non deve mai impedire l'avvio
+        logging.getLogger(__name__).warning("Backup automatico non riuscito: %s", e)
+
+import threading
+threading.Thread(target=_startup_backup, daemon=True).start()
 
 
 # ── Avvio del server web ─────────────────────────────────────────────────────────

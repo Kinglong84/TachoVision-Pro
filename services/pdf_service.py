@@ -71,7 +71,7 @@ from reportlab.platypus import (
 from reportlab.platypus.flowables import Flowable  # classe base per elementi personalizzati
 
 from models.card_data import CardData, DayActivity
-from models.violations import detect_violations, violation_summary, SEV_VERY, SEV_HIGH, SEV_LOW
+from models.violations import detect_violations, violation_summary, MSI, SEV_VERY, SEV_HIGH, SEV_LOW
 
 
 # ── Palette colori PDF ────────────────────────────────────────────────────────
@@ -101,7 +101,8 @@ _ACT = {
 
 # Mappa severità infrazione → colore (usata nella tabella infrazioni)
 _SEV = {
-    SEV_VERY: _C["sev_mg"],   # Molto Grave → rosso
+    MSI:      colors.HexColor("#991B1B"),   # più grave → rosso scuro
+    SEV_VERY: _C["sev_mg"],   # molto grave (VSI) → rosso
     SEV_HIGH: _C["sev_g"],    # Grave → arancione scuro
     SEV_LOW:  _C["sev_l"],    # Lieve → arancione
 }
@@ -562,7 +563,7 @@ def generate_violations_pdf(cd: CardData) -> bytes:
       - Colore cella = colore della severità corrispondente
     """
     buf   = io.BytesIO()
-    viols = detect_violations(cd.activities)   # lista Violation
+    viols = detect_violations(cd.activities, cd=cd)   # lista Violation
     vs    = violation_summary(viols)            # {SEV_VERY: N, SEV_HIGH: N, SEV_LOW: N, "total": N}
     period = _period(cd.activities)
 
@@ -575,16 +576,20 @@ def generate_violations_pdf(cd: CardData) -> bytes:
     story = []
 
     # ── Tabella riepilogo conteggi (4 celle colorate) ─────────────────────────
-    cnt_data = [[Paragraph(f"{ic}  {vs[s]}\n{s}",
+    # 4 livelli di gravità Reg. UE 2016/403 + totale
+    cnt_data = [[Paragraph(f"{vs[s]}<br/>{lbl}",
                            ParagraphStyle("cn", fontName="Helvetica-Bold", fontSize=10,
                                           textColor=colors.white))
-                 for ic, s in [("🚨", SEV_VERY), ("🔴", SEV_HIGH), ("🟡", SEV_LOW), ("⚠️", "total")]]]
-    cnt = Table(cnt_data, colWidths=[CONTENT_W / 4] * 4)
+                 for s, lbl in [(MSI, "MSI più grave"), (SEV_VERY, "VSI molto grave"),
+                                (SEV_HIGH, "SI grave"), (SEV_LOW, "MI minore"),
+                                ("total", "Totale")]]]
+    cnt = Table(cnt_data, colWidths=[CONTENT_W / 5] * 5)
     cnt.setStyle(TableStyle([
-        ("BACKGROUND",    (0,0), (0,0), _C["sev_mg"]),   # Molto Grave → rosso
-        ("BACKGROUND",    (1,0), (1,0), _C["sev_g"]),    # Grave → arancione scuro
-        ("BACKGROUND",    (2,0), (2,0), _C["sev_l"]),    # Lieve → arancione
-        ("BACKGROUND",    (3,0), (3,0), colors.HexColor("#555")),  # Totale → grigio
+        ("BACKGROUND",    (0,0), (0,0), _SEV[MSI]),
+        ("BACKGROUND",    (1,0), (1,0), _C["sev_mg"]),
+        ("BACKGROUND",    (2,0), (2,0), _C["sev_g"]),
+        ("BACKGROUND",    (3,0), (3,0), _C["sev_l"]),
+        ("BACKGROUND",    (4,0), (4,0), colors.HexColor("#555")),  # Totale → grigio
         ("ALIGN",         (0,0), (-1,-1), "CENTER"),
         ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
         ("TOPPADDING",    (0,0), (-1,-1), 6),

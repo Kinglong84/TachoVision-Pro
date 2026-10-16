@@ -58,7 +58,9 @@ class ActivityChange:
     """
     time: int           # minuti dalla mezzanotte (0-1439)
     activity: str       # "Guida" | "Lavoro" | "Disponibilità" | "Riposo"
-    manual: bool = False  # False = registrazione automatica del tachigrafo
+    manual: bool = False  # True = carta non inserita, attività inserita a mano
+    crew: bool = False    # True = guida in equipaggio (multipresenza), carta inserita
+    card_inserted: bool = True  # False = periodo con carta non inserita
 
 
 @dataclass
@@ -205,6 +207,8 @@ class Place:
     gnss_lat: Optional[float] = None   # latitudine GPS (None = non disponibile)
     gnss_lon: Optional[float] = None   # longitudine GPS
     gnss_accuracy: int = 0  # precisione GPS in decimetri (0 = N/D, 255 = non valido)
+    ts_utc: int = 0         # timestamp Unix UTC con i secondi
+    manual: bool = False    # True = inserito a mano (EntryTypeDailyWorkPeriod 2/3)
 
 
 @dataclass
@@ -364,20 +368,25 @@ class Violation:
     Le infrazioni vengono rilevate da models/violations.py analizzando
     le attività del conducente e confrontandole con i limiti normativi.
 
-    Livelli di severità:
-        Molto Grave → sanzione massima, sospensione attività
-        Grave       → sanzione alta
-        Lieve       → sanzione ridotta
+    # Gravità secondo l'Allegato I del Reg. UE 2016/403:
+        MSI → infrazione più grave
+        VSI → infrazione molto grave
+        SI  → infrazione grave
+        MI  → infrazione minore
     """
-    date: str           # "YYYY-MM-DD"
+    date: str           # "YYYY-MM-DD" (data locale di inizio)
     date_display: str   # "DD/MM/YYYY" — per visualizzazione
-    code: str           # codice infrazione (es. "DayDriving", "ContinuousDriving")
-    description: str    # titolo breve dell'infrazione
-    detail: str         # descrizione estesa con articolo violato
-    severity: str       # "Molto Grave" | "Grave" | "Lieve"
+    code: str           # codice infrazione (es. "DayDriving_9", "ContinuousDriving")
+    description: str    # testo dell'infrazione
+    detail: str         # dettaglio "misurato (soglia)", es. "Tempo di guida 10:20 (09:00)"
+    severity: str       # "MSI" | "VSI" | "SI" | "MI"
     value_min: int = 0  # valore rilevato (in minuti)
     limit_min: int = 0  # limite normativo (in minuti)
     excess_min: int = 0 # eccesso rispetto al limite (in minuti)
+    start: str = ""     # inizio periodo "DD/MM/YY HH:MM" (ora locale)
+    end: str = ""       # fine periodo "DD/MM/YY HH:MM"
+    category: str = ""  # "AETR" | "WTD" | "TACHO" | "OTHER"
+    note: str = ""      # informazioni aggiuntive (es. "overdrive", "noc,1+1")
 
     def _fmt(self, m: int) -> str:
         """Formatta minuti in "Xh YY" o "Ymin" se inferiore a 1 ora."""
@@ -395,19 +404,40 @@ class Violation:
     @property
     def icon(self) -> str:
         """Emoji corrispondente alla severità."""
-        return {"Molto Grave": "🚨", "Grave": "🔴", "Lieve": "🟡"}.get(self.severity, "⚠️")
+        return {"MSI": "🚨", "VSI": "🔴", "SI": "🟠", "MI": "🟡"}.get(self.severity, "⚠️")
 
     @property
     def color(self) -> str:
         """Colore esadecimale corrispondente alla severità (per la UI)."""
-        return {"Molto Grave": "#DC2626", "Grave": "#EF4444",
-                "Lieve": "#F59E0B"}.get(self.severity, "#888")
+        return {"MSI": "#991B1B", "VSI": "#DC2626", "SI": "#F97316",
+                "MI": "#F59E0B"}.get(self.severity, "#888")
+
+    @property
+    def severity_label(self) -> str:
+        """Testo italiano per la gravità."""
+        return {"MSI": "Infrazione più grave", "VSI": "Infrazione molto grave",
+                "SI": "Infrazione grave", "MI": "Infrazione minore",
+                # DataGap, FerryButtonInvalid
+                "W": "Avvertenza"}.get(self.severity, "")
+
+    @property
+    def stars(self) -> int:
+        """Livello 1-4 (filtro a stelle)."""
+        return {"MI": 1, "SI": 2, "VSI": 3, "MSI": 4}.get(self.severity, 0)
+
+    @property
+    def period(self) -> str:
+        if not self.start:
+            return self.date_display
+        # evento puntuale → un solo orario
+        return self.start if self.end in ("", self.start) else f"{self.start} - {self.end}"
 
     def to_dict(self) -> dict:
         """Serializza in dizionario (usato per passare dati alla UI e al PDF)."""
         return {k: getattr(self, k) for k in
                 ("date","date_display","code","description","detail",
-                 "severity","icon","color","value_h","limit_h","excess_h")}
+                 "severity","icon","color","value_h","limit_h","excess_h",
+                 "start","end","category","note","severity_label","period")}
 
 
 @dataclass
@@ -438,6 +468,14 @@ class CardData:
     weekly_summary: List[WeekSummary] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)   # errori di parsing, mostrati all'utente
     demo: bool = False   # True se i dati sono sintetici (modalità demo)
+    # riempiti da models.manual_data.apply_manual()
+    notes: list = field(default_factory=list)
+    holidays: list = field(default_factory=list)
+    # riempiti da models.history.build_history()
+    data_gaps: list = field(default_factory=list)       # [[inizio, fine]] minuti UTC
+    history_files: list = field(default_factory=list)   # scarichi uniti
+    card_downloads: list = field(default_factory=list)  # [[precedente, scarico, giorni]]
+    place_ranges: list = field(default_factory=list)    # [[da, a]] coperti dai luoghi
 
     def to_dict(self) -> dict:
         """
@@ -540,4 +578,13 @@ class CardData:
         for w in d.get("weekly_summary", []):
             cd.weekly_summary.append(WeekSummary(**w))
 
+        # note, ferie e attività manuali del
+        # conducente (~/TachoVision/manuale/<carta>.json) entrano in tutti i calcoli
+        if not d.get("_no_manual"):
+            try:
+                from models.manual_data import apply_manual
+                apply_manual(cd)
+            except Exception as e:   # i dati manuali non devono mai bloccare la lettura
+                import logging
+                logging.getLogger(__name__).warning("Dati manuali non applicati: %s", e)
         return cd

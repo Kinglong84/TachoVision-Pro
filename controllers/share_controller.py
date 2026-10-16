@@ -332,7 +332,7 @@ def register(app):
                                                "border":"1px solid #EA433544",
                                                "color":"#EA4335","borderRadius":"6px",
                                                "padding":"8px 14px","cursor":"pointer",
-                                               "fontFamily":"'Space Grotesk'"}),
+                                               "fontFamily":"'Overpass'"}),
                         ]),
                         # Feedback dopo aver inserito il codice
                         html.Div(id="gdrive-confirm-result",
@@ -380,7 +380,7 @@ def register(app):
                                            "background":"#0078D422","border":"1px solid #0078D444",
                                            "color":"#0078D4","borderRadius":"6px",
                                            "padding":"8px 14px","cursor":"pointer",
-                                           "fontFamily":"'Space Grotesk'"}),
+                                           "fontFamily":"'Overpass'"}),
                         html.Div(id="od-confirm-result",
                                  style={"marginTop":"6px","fontSize":"0.8rem"}),
                     ], style={"background":C["surface"],"borderRadius":"8px",

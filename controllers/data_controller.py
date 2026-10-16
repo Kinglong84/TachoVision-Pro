@@ -120,6 +120,27 @@ def make_demo() -> CardData:
 
 
 # ── Upload handler ────────────────────────────────────────────────────────────
+def download_time_from_filename(filename: str) -> str:
+    """
+    Nome file standard dei download carta: C_YYYYMMDD_HHMM_<...>.DDD (ora UTC).
+    Ritorna "DD/MM/YYYY HH:MM" nel fuso orario delle impostazioni, o "" se assente.
+    """
+    import re
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    from models.settings import load_settings
+    m = re.search(r"(?:^|_)C_(\d{8})_(\d{4})", "_" + os.path.basename(filename or ""))
+    if not m:
+        return ""
+    try:
+        utc = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+        tz = load_settings().timezone
+        local = utc.astimezone(ZoneInfo(tz)) if tz else utc.astimezone()
+        return local.strftime("%d/%m/%Y %H:%M")
+    except (ValueError, KeyError):
+        return ""
+
+
 def from_upload(contents: str, filename: Optional[str] = None) -> CardData:
     """
     Riceve il contenuto base64 da dcc.Upload, lo decodifica, lo parsa.
@@ -134,7 +155,11 @@ def from_upload(contents: str, filename: Optional[str] = None) -> CardData:
         if filename:
             cd.driver.filename = filename
             cd.driver.file_size = str(len(raw))
-            cd.driver.last_download = datetime.now().strftime("%d/%m/%Y %H:%M")
+            # la data di scarico è quella
+            # registrata sulla carta; se manca, quella nel nome file C_YYYYMMDD_HHMM
+            # (UTC). Non usare l'ora del caricamento.
+            if not cd.driver.last_download:
+                cd.driver.last_download = download_time_from_filename(filename)
         return cd
     except Exception as e:
         import logging
