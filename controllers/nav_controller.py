@@ -67,6 +67,11 @@ def register(app):
             # Nessun trigger = chiamata iniziale, non dovrebbe succedere
             # grazie a prevent_initial_call=True, ma per sicurezza:
             return current
+        # Ogni ridisegno ricrea la sidebar: Dash può chiamare questo callback con
+        # tutti i pulsanti "cambiati" e n_clicks = 0 (es. clic su 📍 in Luoghi),
+        # e senza questo controllo si tornava alla Dashboard. Conta solo un clic vero.
+        if len(ctx.triggered) != 1 or not ctx.triggered[0].get("value"):
+            raise PreventUpdate
 
         # Estrae l'id del componente che ha triggerato il callback
         # "tab-btn-attivita.n_clicks" → split(".")[0] → "tab-btn-attivita"
