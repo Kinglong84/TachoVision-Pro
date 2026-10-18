@@ -36,8 +36,11 @@ PREFIX = {"activities": "ACTIVITIES_", "worktime": "WORKTIME_", "vehicle": "VEHI
           "infringement": "INFRINGEMENT_"}
 FORMATS = {"activities": ["pdf", "pdf_graph", "csv"], "worktime": ["pdf", "csv"],
            "vehicle": ["pdf", "csv"], "gps": ["csv"], "country": ["pdf", "csv"],
-           "rest": ["pdf"], "infringement": ["pdf"]}
-FORMAT_LABEL = {"pdf": "Pdf", "pdf_graph": "Pdf (solo grafico)", "csv": "Excel"}
+           "rest": ["pdf"], "infringement": ["pdf", "pdf_grouped"]}
+FORMAT_LABEL = {"pdf": "Pdf", "pdf_graph": "Pdf (solo grafico)", "csv": "Excel",
+                "pdf_grouped": "Pdf (raggruppato)"}
+# opzioni aggiuntive del dialog di esportazione (es. campi firma delle infrazioni)
+EXPORT_OPTIONS = {"infringement": [("sign", "Campi per la firma alla fine del rapporto")]}
 TITLES = {"activities": "Attività", "worktime": "Riepilogo del tempo di lavoro",
           "vehicle": "Elenco di utilizzo del veicolo", "gps": "Posizioni GPS",
           "country": "Paesi visitati", "rest": "Periodi di riposo",
@@ -165,7 +168,6 @@ def _activities(cd, s, fmt, d_from, d_to):
 
 def _worktime_csv(periods, tl, s, shift: bool, only_headers: bool, wage: bool) -> str:
     """
-    (WORKTIME_)
     Colonne secondo la vista mostrata:
       per giorno     DAY | | GUIDA LAVORO DISPONIBILITÀ INTERRUZIONE | [fascia (●)] | KM
       per turno      START STOP ΔT | | GUIDA LAVORO DISPONIBILITÀ INTERRUZIONE
@@ -320,12 +322,13 @@ def _rest(cd, s, fmt, d_from, d_to):
     return rest_pdf(cd, s, items, d_from, d_to)
 
 
-def _infringement(cd, s, fmt, d_from, d_to, grouped=False, signature=True):
+def _infringement(cd, s, fmt, d_from, d_to, options=()):
     from services.pdf_canvas import infringement_pdf
     from models.history import violations_with_history
     viols = [v for v in violations_with_history(cd, s)
              if (not d_from or v.date >= d_from[:10]) and (not d_to or v.date <= d_to[:10])]
-    return infringement_pdf(cd, s, viols, d_from, d_to, grouped, signature)
+    return infringement_pdf(cd, s, viols, d_from, d_to, grouped=fmt == "pdf_grouped",
+                            signature="sign" in (options or ()))
 
 
 _BUILDERS = {"activities": _activities, "worktime": _worktime, "vehicle": _vehicle,
@@ -333,7 +336,7 @@ _BUILDERS = {"activities": _activities, "worktime": _worktime, "vehicle": _vehic
 
 
 def generate(report: str, fmt: str, cd: CardData, d_from: str = None, d_to: str = None,
-             settings: Settings = None, view: dict = None):
+             settings: Settings = None, view: dict = None, options=None):
     """
     Ritorna (contenuto bytes|str, nome file).
     view: stato della schermata da cui si esporta (per il riepilogo:
@@ -345,4 +348,6 @@ def generate(report: str, fmt: str, cd: CardData, d_from: str = None, d_to: str 
     extra = {}
     if report == "worktime" and view:
         extra = {k: view[k] for k in ("view", "options", "order") if view.get(k) is not None}
+    if report == "infringement":
+        extra = {"options": options or []}
     return _BUILDERS[report](cd, s, fmt, d_from, d_to, **extra), filename(report, fmt, cd)

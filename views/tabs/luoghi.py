@@ -24,7 +24,7 @@ from views.components import (
     filter_bar, filter_input, filter_select, filter_count_badge,
 )
 from views.charts import pie_countries   # grafico torta paesi visitati
-from views.theme import C
+from views.theme import C, btn_ghost
 from models.card_data import CardData
 
 
@@ -64,110 +64,142 @@ def _place_iso_date(datetime_str: str) -> str:
     return ""
 
 
-def _gnss_map(gnss_records: list) -> dcc.Graph:
-    """
-    Mappa GPS interattiva su OpenStreetMap (nessun API key richiesto).
+ESRI_IMAGERY = ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/"
+                "MapServer/tile/{z}/{y}/{x}")
 
-    Mostra: linea percorso (tratteggiata, semitrasparente) + punti di sosta
-    colorati dal più vecchio (grigio) al più recente (ciano).
-    Il punto di partenza è verde, quello di arrivo è arancione.
+
+def gnss_points(gnss_records: list) -> list:
+    """Punti della mappa (per lo store del navigatore)."""
+    return [{"lat": g.lat, "lon": g.lon, "time": g.timestamp,
+             "text": (f"<b>{g.timestamp}</b><br>📍 {g.lat:.5f}°N, {g.lon:.5f}°E<br>"
+                      f"🎯 Precisione: {g.accuracy_dm/10:.1f} m<br>"
+                      f"🚛 Odometro: {g.odometer_km:,} km".replace(",", "."))}
+            for g in gnss_records]
+
+
+def gnss_figure(points: list, selected: int = None, layer: str = "strade"):
+    """
+    Mappa GPS (OpenStreetMap o satellite Esri, nessuna chiave richiesta).
+    Linea del percorso + punti dal più vecchio (grigio) al più recente (ciano),
+    partenza verde, ultima posizione arancione.
+    con un punto selezionato la mappa si centra su di lui
+    (navigazione primo / precedente / successivo / ultimo); senza, mostra tutto.
     """
     import plotly.graph_objects as go
     from views.theme import plotly_base
 
-    lats  = [g.lat       for g in gnss_records]
-    lons  = [g.lon       for g in gnss_records]
-    texts = [
-        f"<b>{g.timestamp}</b><br>"
-        f"📍 {g.lat:.5f}°N, {g.lon:.5f}°E<br>"
-        f"🎯 Precisione: {g.accuracy_dm/10:.1f} m<br>"
-        f"🚛 Odometro: {g.odometer_km:,} km".replace(",", ".")
-        for g in gnss_records
-    ]
-
+    lats = [p["lat"] for p in points]
+    lons = [p["lon"] for p in points]
+    texts = [p["text"] for p in points]
     n = len(lats)
-    # Sfumatura di colore dal grigio (vecchio) al ciano (recente)
     colors = [
         f"rgba({int(30 + 170*i/(max(n-1,1)))},{int(220*i/(max(n-1,1)))},{int(130 + 125*i/(max(n-1,1)))},0.85)"
         for i in range(n)
     ]
-
     fig = go.Figure()
-
-    # Linea percorso
-    fig.add_trace(go.Scattermapbox(
-        lat=lats, lon=lons,
-        mode="lines",
-        line=dict(width=2, color="rgba(0,200,200,0.3)"),
-        hoverinfo="skip",
-        showlegend=False,
-    ))
-
-    # Punti intermedi
+    fig.add_trace(go.Scattermapbox(lat=lats, lon=lons, mode="lines",
+                                   line=dict(width=2, color="rgba(0,200,200,0.45)"),
+                                   hoverinfo="skip", showlegend=False))
     if n > 2:
-        fig.add_trace(go.Scattermapbox(
-            lat=lats[1:-1], lon=lons[1:-1],
-            text=texts[1:-1],
-            mode="markers",
-            marker=dict(size=8, color=colors[1:-1]),
-            hovertemplate="%{text}<extra></extra>",
-            name="Waypoint",
-        ))
-
-    # Punto di partenza (verde)
+        fig.add_trace(go.Scattermapbox(lat=lats[1:-1], lon=lons[1:-1], text=texts[1:-1],
+                                       mode="markers", marker=dict(size=8, color=colors[1:-1]),
+                                       hovertemplate="%{text}<extra></extra>", name="Waypoint"))
     if n >= 1:
-        fig.add_trace(go.Scattermapbox(
-            lat=[lats[0]], lon=[lons[0]],
-            text=[texts[0]],
-            mode="markers",
-            marker=dict(size=12, color="#10B981", symbol="circle"),
-            hovertemplate="%{text}<extra></extra>",
-            name="Partenza",
-        ))
-
-    # Punto di arrivo (arancione)
+        fig.add_trace(go.Scattermapbox(lat=[lats[0]], lon=[lons[0]], text=[texts[0]],
+                                       mode="markers", marker=dict(size=12, color="#10B981"),
+                                       hovertemplate="%{text}<extra></extra>", name="Partenza"))
     if n >= 2:
-        fig.add_trace(go.Scattermapbox(
-            lat=[lats[-1]], lon=[lons[-1]],
-            text=[texts[-1]],
-            mode="markers",
-            marker=dict(size=12, color="#F59E0B", symbol="circle"),
-            hovertemplate="%{text}<extra></extra>",
-            name="Ultima posizione",
-        ))
-
-    # Centro della mappa = baricentro dei punti
-    center_lat = sum(lats) / n if lats else 45
-    center_lon = sum(lons) / n if lons else 12
-
-    # Zoom automatico in base all'estensione geografica
-    if lats:
-        span = max(max(lats) - min(lats), max(lons) - min(lons), 0.01)
-        zoom = max(4, min(13, round(8 - span * 0.6)))
+        fig.add_trace(go.Scattermapbox(lat=[lats[-1]], lon=[lons[-1]], text=[texts[-1]],
+                                       mode="markers", marker=dict(size=12, color="#F59E0B"),
+                                       hovertemplate="%{text}<extra></extra>",
+                                       name="Ultima posizione"))
+    if selected is not None and 0 <= selected < n:
+        fig.add_trace(go.Scattermapbox(lat=[lats[selected]], lon=[lons[selected]],
+                                       text=[points[selected]["time"]],
+                                       customdata=[texts[selected]], mode="markers+text",
+                                       marker=dict(size=18, color="#C1121F"),
+                                       textposition="top right",
+                                       textfont=dict(size=13, color="#FFFFFF"
+                                                     if layer == "satellite" else C["text"]),
+                                       hovertemplate="%{customdata}<extra></extra>",
+                                       name="Selezionato"))
+        center, zoom = dict(lat=lats[selected], lon=lons[selected]), 13
     else:
-        zoom = 6
-
+        center = dict(lat=sum(lats) / n if n else 45, lon=sum(lons) / n if n else 12)
+        span = max(max(lats) - min(lats), max(lons) - min(lons), 0.01) if n else 0
+        zoom = max(3, min(13, round(8 - span * 0.6))) if n else 6
+    mapbox = dict(style="open-street-map", center=center, zoom=zoom)
+    if layer == "satellite":
+        mapbox.update(style="white-bg", layers=[{
+            "below": "traces", "sourcetype": "raster", "source": [ESRI_IMAGERY],
+            "sourceattribution": "Tiles © Esri — World Imagery"}])
     fig.update_layout(
-        **plotly_base(
-            margin=dict(l=0, r=0, t=0, b=0),
-            height=480,
-            legend=dict(
-                orientation="h", x=0.01, y=0.01,
-                bgcolor="rgba(7,11,20,0.75)",
-                font=dict(color=C["text"], size=11),
-            ),
-        ),
-        mapbox=dict(
-            style="open-street-map",
-            center=dict(lat=center_lat, lon=center_lon),
-            zoom=zoom,
-        ),
-    )
-    return dcc.Graph(
-        figure=fig,
-        config={"displayModeBar": True, "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
-        style={"borderRadius": "10px", "overflow": "hidden"},
-    )
+        **plotly_base(margin=dict(l=0, r=0, t=0, b=0), height=480,
+                      legend=dict(orientation="h", x=0.01, y=0.01,
+                                  bgcolor="rgba(246,247,244,0.85)",
+                                  font=dict(color=C["text"], size=11))),
+        mapbox=mapbox)
+    return fig
+
+
+def _gnss_map(gnss_records: list) -> html.Div:
+    """Mappa con navigatore: ⏮ primo, ◀ precedente, ⤢ adatta tutto, ▶ successivo,
+    ⏭ ultimo, livello Strade/Satellite (gestito da controllers/gps_controller.py)."""
+    points = gnss_points(gnss_records)
+    btn = lambda i, label, title: html.Button(label, id=i, n_clicks=0, title=title,
+                                              style={**btn_ghost(), "minWidth": "40px",
+                                                     "padding": "4px 10px"})
+    bar = html.Div([
+        btn("gnss-first", "⏮", "Primo punto"), btn("gnss-prev", "◀", "Precedente"),
+        btn("gnss-fit", "⤢", "Adatta tutto"), btn("gnss-next", "▶", "Successivo"),
+        btn("gnss-last", "⏭", "Ultimo punto"),
+        html.Button("Satellite", id="gnss-layer", n_clicks=0,
+                    style={**btn_ghost(), "marginLeft": "12px", "padding": "4px 12px"}),
+        html.Span(f"{len(points)} punti", id="gnss-caption",
+                  style={"marginLeft": "12px", "fontSize": "0.82rem", "color": C["muted"]}),
+    ], style={"display": "flex", "gap": "6px", "alignItems": "center", "flexWrap": "wrap",
+              "marginBottom": "8px"})
+    return html.Div([
+        bar,
+        dcc.Store(id="gnss-points", data=points),
+        dcc.Store(id="gnss-view", data={"idx": None, "layer": "strade"}),
+        dcc.Graph(id="gnss-map", figure=gnss_figure(points),
+                  config={"displayModeBar": True,
+                          "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
+                  style={"borderRadius": "10px", "overflow": "hidden"}),
+    ])
+
+
+def _coord(r: dict) -> str:
+    return f"{r['lat']:.4f}, {r['lon']:.4f}" if r.get("lat") is not None and         r.get("lon") is not None else "—"
+
+
+def _gen2_v2_sections(cd: CardData) -> list:
+    """Carte Gen2 v2: attraversamenti di frontiera (EF 0528) e carico/scarico (EF 0529)."""
+    mono = {"fontFamily": "'Overpass'", "fontSize": "0.8rem", "whiteSpace": "nowrap"}
+    km = lambda r: f"{r['odometer_km']:,} km".replace(",", ".")
+    out = []
+    if cd.border_crossings:
+        rows = [html.Tr([html.Td(r["datetime"], style=mono),
+                         html.Td(f"{FLAG.get(r['country_left'], '🏳')} {r['country_left']} → "
+                                 f"{FLAG.get(r['country_entered'], '🏳')} {r['country_entered']}"),
+                         html.Td(km(r), style={**mono, "textAlign": "right"}),
+                         html.Td(_coord(r), style={**mono, "color": C["muted"]})])
+                for r in cd.border_crossings]
+        out.append(section(f"Attraversamenti di frontiera ({len(rows)})", html.Table(
+            [html.Thead(html.Tr([html.Th(h) for h in ("Data/Ora", "Frontiera", "Odometro",
+                                                      "Coordinate GNSS")])),
+             html.Tbody(rows)], className="veh-table")))
+    if cd.load_unload:
+        rows = [html.Tr([html.Td(r["datetime"], style=mono), html.Td(r["operation"]),
+                         html.Td(km(r), style={**mono, "textAlign": "right"}),
+                         html.Td(_coord(r), style={**mono, "color": C["muted"]})])
+                for r in cd.load_unload]
+        out.append(section(f"Operazioni di carico e scarico ({len(rows)})", html.Table(
+            [html.Thead(html.Tr([html.Th(h) for h in ("Data/Ora", "Operazione", "Odometro",
+                                                      "Coordinate GNSS")])),
+             html.Tbody(rows)], className="veh-table")))
+    return out
 
 
 def render(cd: CardData, gnss_date: str = None) -> html.Div:
@@ -293,6 +325,7 @@ def render(cd: CardData, gnss_date: str = None) -> html.Div:
     # in cima, al posto del vecchio banner
     from views.countries import countries_section
     parts = [countries_section(cd), overview_row]
+    parts += _gen2_v2_sections(cd)
 
     # ── Sezione GNSS (solo se la carta ha waypoint GPS) ──────────────────────────
     if cd.gnss_records:

@@ -23,12 +23,13 @@ def register(app):
         State({"type": "exp-fmt", "report": ALL}, "value"),
         State({"type": "exp-range", "report": ALL}, "start_date"),
         State({"type": "exp-range", "report": ALL}, "end_date"),
+        State({"type": "exp-opt", "report": ALL}, "value"),
         State({"type": "exp-btn", "report": ALL}, "id"),
         State("store-data", "data"),
         State("store-wt-view", "data"),
         prevent_initial_call=True,
     )
-    def download(clicks, fmts, starts, ends, ids, raw, wt_view):
+    def download(clicks, fmts, starts, ends, opts, ids, raw, wt_view):
         trig = callback_context.triggered[0]
         if not raw or not trig["value"]:
             raise PreventUpdate
@@ -38,7 +39,7 @@ def register(app):
         msgs = [""] * len(ids)
         try:
             data, name = generate(report, fmts[i], CardData.from_dict(raw), starts[i], ends[i],
-                              view=wt_view)
+                              view=wt_view, options=opts[i] if i < len(opts) else [])
         except Exception as e:      # il messaggio va mostrato vicino al pulsante
             msgs[i] = f"⚠️ Impossibile creare il file: {e}"
             return no_update, msgs

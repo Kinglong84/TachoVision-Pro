@@ -383,20 +383,69 @@ class DropboxService:
 # ─────────────────────────────────────────────────────────────────────────────
 # Facade: upload su tutti i provider configurati
 # ─────────────────────────────────────────────────────────────────────────────
+# ── Coda degli invii non riusciti ───────────────────────────────────────────────
+# Un invio fallito (rete assente, servizio non raggiungibile) resta in coda e viene
+# ritentato all'avvio dell'app e prima di ogni nuovo invio.
+OUTBOX_DIR = CONFIG_DIR / "outbox"
+
+
+def _services() -> dict:
+    return {"Google Drive": GoogleDriveService(), "OneDrive": OneDriveService(),
+            "Dropbox": DropboxService()}
+
+
+def _queue(provider: str, filename: str, data: bytes) -> None:
+    OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
+    (OUTBOX_DIR / f"{provider}__{filename}").write_bytes(data)
+
+
+def pending_uploads() -> list[str]:
+    """File in attesa di invio ("provider: nome file")."""
+    if not OUTBOX_DIR.exists():
+        return []
+    return [p.name.replace("__", ": ", 1) for p in sorted(OUTBOX_DIR.iterdir()) if p.is_file()]
+
+
+def retry_outbox() -> list[dict]:
+    """Ritenta gli invii in coda; quelli riusciti escono dalla coda."""
+    if not OUTBOX_DIR.exists():
+        return []
+    services, results = _services(), []
+    for p in sorted(OUTBOX_DIR.iterdir()):
+        provider, _, filename = p.name.partition("__")
+        svc = services.get(provider)
+        if not p.is_file() or not filename or svc is None or not svc.is_authenticated():
+            continue
+        try:
+            ok, msg = svc.upload(filename, p.read_bytes())
+        except Exception as e:
+            ok, msg = False, str(e)
+        if ok:
+            p.unlink(missing_ok=True)
+        results.append({"provider": provider, "ok": ok, "message": msg, "file": filename})
+    return results
+
+
 def upload_to_all(filename: str, data: bytes) -> list[dict]:
     """
     Tenta l'upload su tutti i provider autenticati.
     Restituisce lista di {"provider": str, "ok": bool, "message": str}.
+    Gli invii non riusciti restano in coda (retry_outbox).
     """
+    try:
+        retry_outbox()
+    except Exception:
+        pass
     results = []
-    services = [
-        ("Google Drive", GoogleDriveService()),
-        ("OneDrive",     OneDriveService()),
-        ("Dropbox",      DropboxService()),
-    ]
-    for name, svc in services:
+    for name, svc in _services().items():
         if not svc.is_authenticated():
             continue
-        ok, msg = svc.upload(filename, data)
+        try:
+            ok, msg = svc.upload(filename, data)
+        except Exception as e:
+            ok, msg = False, str(e)
+        if not ok:
+            _queue(name, filename, data)
+            msg = f"{msg} — in coda, verrà ritentato"
         results.append({"provider": name, "ok": ok, "message": msg})
     return results

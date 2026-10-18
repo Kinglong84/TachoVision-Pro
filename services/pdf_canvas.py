@@ -27,6 +27,8 @@ import math
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
+from models.settings import card_display
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -166,7 +168,7 @@ class AppPdf:
         self.text(f"{d.firstname} {d.surname}".strip(), M, y, 15, font=BOLD)
         tz = self.s.timezone or "predefinito"
         for ln in (f"Data di nascita: {d.birth_date}" if d.birth_date else "",
-                   f"Numero della carta del conducente: {d.card_number}"
+                   f"Numero della carta del conducente: {card_display(d.card_number)}"
                    if d.card_number else "",
                    f"Data di download: {d.last_download}" if d.last_download else "",
                    f"Fuso orario: {tz}"):
@@ -391,7 +393,8 @@ def _day_block(pdf: AppPdf, day, segs, shifts, crew, countries, draw: bool, y: f
 def activities_pdf(cd, s, d_from: Optional[str], d_to: Optional[str], graph_only=False) -> bytes:
     """(ACTIVITIES_…pdf)."""
     from models.day_events import build_days
-    from models.timeline import Timeline, build_shifts, classify_rests
+    from models.timeline import Timeline, build_shifts
+    from models.rest_optimizer import rests_for
     tl = Timeline(cd.activities, s.timezone)
     if not tl.segments:
         pdf = AppPdf(cd, s, date.today(), date.today())
@@ -401,7 +404,7 @@ def activities_pdf(cd, s, d_from: Optional[str], d_to: Optional[str], graph_only
     first = date.fromisoformat(d_from[:10]) if d_from else tl.local(tl.start).date()
     last = date.fromisoformat(d_to[:10]) if d_to else tl.local(tl.end - 1).date()
     days = build_days(cd, s, None, first, last)
-    rests = [r for r in classify_rests(tl) if r.length > 0]
+    rests = [r for r in rests_for(tl, s) if r.length > 0]
     shifts = [(x.start, x.end) for x in build_shifts(tl, rests)]
     places = []
     for p in cd.places:
@@ -614,7 +617,7 @@ def vehicle_pdf(cd, s, rows, d_from, d_to) -> bytes:
 # ── Paesi visitati (COUNTRY_) ────────────────────────────────────────────────
 
 def country_pdf(cd, s, stays, only_base, d_from, d_to) -> bytes:
-    """periodo tra due
+    """ periodo tra due
     linee, paese a 28 con Guida/Lavoro/Disponibilità/Riposo (valori a 160/218/276/
     350), poi entrata, uscita e distanza rientrate a 38."""
     tl, first, last = _period(cd, s, d_from, d_to)
@@ -669,7 +672,7 @@ def _split80(text, width, size=10, font=FONT):
 
 
 def infringement_pdf(cd, s, viols, d_from, d_to, grouped=False, signature=True) -> bytes:
-    """per ogni infrazione
+    """ per ogni infrazione
     linea grigia, descrizione (80% della larghezza) con la gravità in stelle
     allineata a destra (* MI, ** SI, *** VSI, **** MSI), periodo, dettagli in
     grigio; "raggruppato" = intestazione "descrizione (n)" in grassetto e voci
@@ -781,7 +784,7 @@ def infringement_pdf(cd, s, viols, d_from, d_to, grouped=False, signature=True) 
 # ── Periodi di riposo (REST_) ────────────────────────────────────────────────
 
 def rest_pdf(cd, s, items, d_from, d_to) -> bytes:
-    """settimane in
+    """ settimane in
     fascia grigia, turni (guida con continuo, lavoro, disponibilità a 28/113/167)
     e riposi con tipo, compensazioni e paese."""
     from models.rest_report import RestEntry, ShiftEntry, WeekEntry

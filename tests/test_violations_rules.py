@@ -1,6 +1,6 @@
 """
 Test delle regole del motore infrazioni 
-(soglie di gravità, guida tra riposi, orario di lavoro WTD, modalità Italia).
+(soglie di gravità li.b, guida tra riposi, orario di lavoro WTD, modalità Italia).
 """
 import sys
 from datetime import date, timedelta

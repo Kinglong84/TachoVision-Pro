@@ -51,6 +51,10 @@ def register(app):
 
         archive = get_archive()
         entry = archive.save_ddd(raw_bytes, cd, source=raw.get("_source", "upload"))
+        # Impostazione "Cartella di salvataggio": ogni carta letta va copiata anche lì
+        if raw.get("_source") == "smartcard":
+            from services.accessories import copy_to_save_folder
+            copy_to_save_folder(entry.filename, raw_bytes)
         return {"saved": entry.filename, "ts": entry.download_date}
 
     # ── 2. Aggiorna la visualizzazione dell'archivio ──────────────────────────
@@ -312,7 +316,7 @@ def _rebuild_ddd_bytes(cd) -> bytes:
             act_bits = act_map.get(c.activity, 0)
             not_inserted = 0 if c.card_inserted else 1
             c_bit = 1 if (c.crew or c.manual) else 0
-            aci = (c_bit << 14) | (not_inserted << 13) | (act_bits << 11) | (c.time & 0x7FF)
+            aci = ((1 << 15) if getattr(c, "slot2", False) else 0) | (c_bit << 14) |                 (not_inserted << 13) | (act_bits << 11) | (c.time & 0x7FF)
             aci_bytes += struct.pack(">H", aci)
 
         dist    = max(0, min(65535, int(day.distance_km)))   # km interi

@@ -61,7 +61,9 @@
         /* Aggiorna testo e tooltip del pulsante toggle */
         document.querySelectorAll(".sidebar-collapse-btn").forEach(function (btn) {
             btn.textContent = collapsed ? "▶" : "◀";
-            btn.title       = collapsed ? "Espandi sidebar" : "Comprimi sidebar";
+            var T = window.TV_TEXT || {};   /* testi nella lingua scelta (settings_controller) */
+            btn.title       = collapsed ? (T["Espandi sidebar"] || "Espandi sidebar")
+                                        : (T["Comprimi sidebar"] || "Comprimi sidebar");
         });
     }
 

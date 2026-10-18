@@ -121,7 +121,7 @@ def _welcome_screen() -> html.Div:
                     id="btn-welcome-demo",
                     n_clicks=0,
                     style={**btn_style(C["accent"]), "marginTop": "10px",
-                           "background": "transparent"},
+                           "background": "transparent", "color": C["accent"]},
                 ),
             ], style={"display": "flex", "flexDirection": "column", "alignItems": "center"}),
         ], style={
@@ -138,6 +138,11 @@ def _welcome_screen() -> html.Div:
         "alignItems": "center",       # centra verticalmente
         "minHeight": "55vh",          # occupa almeno il 55% dell'altezza della finestra
     })
+
+
+# Consigli quando il lettore non viene visto (come i lettori ufficiali)
+READER_TIPS = ("Lettore non visto? Usa un cavo dati (non solo di ricarica), prova un hub "
+               "USB alimentato: alcuni adattatori USB-C non danno abbastanza corrente.")
 
 
 def read_card_to_store() -> dict:
@@ -163,7 +168,8 @@ def read_card_to_store() -> dict:
     if not readers:
         from controllers.data_controller import make_demo
         demo = make_demo()
-        demo.errors = ["Nessun lettore USB rilevato. Collega il lettore e riprova."]
+        demo.errors = ["Nessun lettore USB rilevato. Collega il lettore e riprova.",
+                       READER_TIPS]
         return demo.to_dict()
 
     try:
@@ -177,8 +183,11 @@ def read_card_to_store() -> dict:
             demo.errors = [f"Lettori trovati: {readers}. Inserisci la carta e riprova."]
             return demo.to_dict()
 
-        # Leggi i byte grezzi dalla carta
-        raw_bytes = read_card(reader_name)
+        # Leggi i byte grezzi dalla carta. Con "Timestamp della carta" acceso, dopo la
+        # lettura la data di scarico viene scritta sulla carta (come i lettori ufficiali)
+        from models.settings import load_settings
+        from services.card_service import LAST_READ
+        raw_bytes = read_card(reader_name, write_stamp=load_settings().cardstamping)
 
         # Parsa e arricchisci
         cd = parse_ddd(raw_bytes)
@@ -186,6 +195,8 @@ def read_card_to_store() -> dict:
         cd.demo = False
         cd.driver.last_download = datetime.now().strftime("%d/%m/%Y %H:%M")
         cd.driver.file_size = str(len(raw_bytes))
+        if LAST_READ.get("stamp") and not LAST_READ.get("stamp_ok"):
+            cd.errors.append(str(LAST_READ["stamp"]))   # avviso solo se non scritta
 
         d = cd.to_dict()
         # Encode base64 dei byte grezzi → auto_save_ddd li salva su disco e in archivio
@@ -193,9 +204,8 @@ def read_card_to_store() -> dict:
         d["_source"] = "smartcard"
         try:
             from services.accessories import auto_send
-            fname = (f"C_{datetime.utcnow().strftime('%Y%m%d_%H%M')}_"
-                     f"{cd.driver.surname}_{cd.driver.card_number}.DDD")
-            auto_send(cd, raw_bytes, fname)
+            from services.archive_service import ddd_filename
+            auto_send(cd, raw_bytes, ddd_filename(cd.driver, datetime.now()))
         except Exception as e:   # l'invio non deve mai bloccare la lettura
             import logging
             logging.getLogger(__name__).warning("Invio automatico non riuscito: %s", e)
@@ -208,20 +218,51 @@ def read_card_to_store() -> dict:
         return demo.to_dict()
 
 
+def read_outcome() -> str:
+    """Esito dell'ultima lettura per la riga accanto a "Leggi Carta"."""
+    from models.settings import load_settings
+    from services.card_service import LAST_READ
+    if not LAST_READ.get("identity"):
+        return ""
+    parts = [f"✔ {LAST_READ['identity']}"]
+    if LAST_READ.get("stamp_ok"):
+        parts.append("data di scarico scritta sulla carta")
+    if load_settings().automaticread:
+        parts.append("estrai la carta e inserisci la prossima")
+    return " · ".join(parts)
+
+
 def register(app):
     """Registra i callback di rendering sull'istanza Dash."""
 
     # ── Callback 1a: lettura carta tachigrafica USB ───────────────────────────────
+    # Mentre legge, "card-read-tick" è attivo e mostra l'avanzamento (card_service.PROGRESS)
     @app.callback(
         Output("store-data", "data", allow_duplicate=True),
+        Output("card-read-status", "children", allow_duplicate=True),
         Input("btn-read-card", "n_clicks"),
+        running=[(Output("card-read-tick", "disabled"), False, True),
+                 (Output("btn-read-card", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def load_from_card(n_clicks):
         """Pulsante "Leggi Carta": legge la carta e salva i dati nello store."""
         if not n_clicks:
             raise PreventUpdate
-        return read_card_to_store()
+        return read_card_to_store(), read_outcome()
+
+    @app.callback(
+        Output("card-read-status", "children"),
+        Input("card-read-tick", "n_intervals"),
+        prevent_initial_call=True,
+    )
+    def show_progress(_n):
+        from services.card_service import PROGRESS
+        if not PROGRESS.get("active"):
+            raise PreventUpdate
+        text = f"File {PROGRESS['step']} di {PROGRESS['total']} · {PROGRESS['text']}"
+        who = PROGRESS.get("identity")
+        return f"⏳ {text} — {who}" if who else f"⏳ {text}"
 
     # ── Callback 1a-ter: dati di esempio ──────────────────────────────────────────
     @app.callback(
@@ -259,6 +300,16 @@ def register(app):
             # nessuna carta, o la stessa carta già letta: niente da fare
             return no_update, {"atr": atr}
         return read_card_to_store(), {"atr": atr}
+
+    @app.callback(
+        Output("card-read-status", "children", allow_duplicate=True),
+        Input("store-card-status", "data"),
+        prevent_initial_call=True,
+    )
+    def auto_read_outcome(status):
+        if not (status or {}).get("atr"):
+            raise PreventUpdate
+        return read_outcome()
 
     # ── Callback 1b: caricamento file .DDD ────────────────────────────────────────
     @app.callback(

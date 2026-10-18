@@ -93,6 +93,12 @@ _SHORT = {  # nomi brevi per il filtro per tipo
     "FerryButtonInvalid": "Commutatore traghetto/treno", "DataGap": "Dati mancanti",
 }
 
+# Art. 12 Reg. 561/2006 (dal 20/08/2020): testo nostro, mostrato sotto i dettagli
+ART12_INFO = ("Possibile deroga Art. 12: il turno termina con il riposo settimanale nel "
+              "paese di base. Per raggiungere la sede o la residenza si può superare la "
+              "guida di 1 ora (2 ore con una pausa di 30 minuti prima), indicando il motivo "
+              "a mano sul tabulato e compensando entro la fine della terza settimana.")
+
 _LABEL = {"fontSize": "0.74rem", "color": C["muted"], "fontWeight": "700", "marginBottom": "4px"}
 
 
@@ -131,6 +137,9 @@ def _item(v, show_details: bool) -> html.Div:
         html.Div([
             html.Div("Dettagli", style=_LABEL),
             html.Div(v.detail, style={"fontFamily": "'Overpass'", "fontSize": "0.84rem"}),
+            html.Div("ℹ️ " + ART12_INFO,
+                     style={"fontSize": "0.78rem", "color": C["info"], "marginTop": "6px"})
+            if v.note in ("overdrive", "overrun") else None,
             html.Details([
                 html.Summary("ℹ️ Norma", style={"cursor": "pointer", "color": C["muted"],
                                                 "fontSize": "0.76rem", "marginTop": "6px"}),
@@ -154,10 +163,27 @@ def filter_violations(cd: CardData, period: str, sevs, codes):
         viols = [v for v in viols if v.date >= since.date().isoformat()]
     sevs = set(sevs or [])
     codes = set(codes or [])
-    # le avvertenze "Dati mancanti" sono sempre mostrate
-    # le avvertenze (senza stelle) seguono solo il filtro per tipo
+    # "Dati mancanti" sempre mostrato; le altre avvertenze seguono il filtro "0 stelle"
     return [v for v in viols if v.code == "DataGap"
-            or (v.code in codes and (v.severity in sevs or v.severity == "W"))]
+            or (v.code in codes and v.severity in sevs)]
+
+
+def _group(desc: str, items, show: bool) -> html.Details:
+    """tipo con il numero di casi; dentro,
+    i casi dal più recente."""
+    worst = min((next((i for i, s in enumerate(SEV_INFO) if s[0] == v.severity), 9)
+                 for v in items), default=9)
+    sev = SEV_INFO[worst] if worst < len(SEV_INFO) else WARN_INFO
+    return html.Details([
+        html.Summary([
+            html.Span(desc, style={"fontWeight": "600", "fontSize": "0.88rem"}),
+            html.Span(f"  {len(items)}", style={"color": sev[3], "fontWeight": "700",
+                                               "marginLeft": "8px"}),
+        ], style={"cursor": "pointer", "padding": "10px 14px"}),
+        html.Div([_item(v, show) for v in items], style={"padding": "0 10px 4px"}),
+    ], style={"background": C["card"], "border": f"1px solid {C['border']}",
+              "borderLeft": f"4px solid {sev[3]}", "borderRadius": "8px",
+              "marginBottom": "10px"})
 
 
 def build_list(cd: CardData, period: str, sevs, codes, details) -> html.Div:
@@ -175,9 +201,16 @@ def build_list(cd: CardData, period: str, sevs, codes, details) -> html.Div:
     if not viols:
         body = empty_state("✅ L'elenco dei falli è vuoto")
     else:
-        show = bool(details)
-        # Contenuto: dalla più recente alla più vecchia
-        body = html.Div([_item(v, show) for v in reversed(viols)])
+        details = details or []
+        show = "on" in details
+        newest = list(reversed(viols))       # dalla più recente alla più vecchia
+        if "grouped" in details:
+            groups = {}
+            for v in newest:
+                groups.setdefault(v.description, []).append(v)
+            body = html.Div([_group(d, items, show) for d, items in groups.items()])
+        else:
+            body = html.Div([_item(v, show) for v in newest])
     return html.Div([counters, body])
 
 
@@ -215,10 +248,13 @@ def render(cd: CardData) -> html.Div:
             html.Div([
                 html.Div("Gravità", style=_LABEL),
                 dcc.Checklist(
-                    id="viol-sev", value=[s[0] for s in SEV_INFO], persistence=True,
+                    id="viol-sev", value=[s[0] for s in SEV_INFO] + [WARN_INFO[0]],
+                    persistence=True,
                     persistence_type="local",
                     options=[{"label": html.Span([" ", _stars(n, col), f"  {lbl}"]),
-                              "value": code} for code, n, lbl, col in SEV_INFO],
+                              "value": code} for code, n, lbl, col in SEV_INFO]
+                    + [{"label": html.Span([" ", _stars(0, WARN_INFO[3]), "  Avvertenza"]),
+                        "value": WARN_INFO[0]}],
                     labelStyle={"display": "block", "fontSize": "0.82rem", "color": C["text"]},
                 ),
             ]),
@@ -226,8 +262,9 @@ def render(cd: CardData) -> html.Div:
                 html.Div("Visualizzazione", style=_LABEL),
                 dcc.Checklist(
                     id="viol-details", value=["on"], persistence=True, persistence_type="local",
-                    options=[{"label": " Dettagli", "value": "on"}],
-                    labelStyle={"fontSize": "0.82rem", "color": C["text"]},
+                    options=[{"label": " Dettagli", "value": "on"},
+                             {"label": " Raggruppato", "value": "grouped"}],
+                    labelStyle={"display": "block", "fontSize": "0.82rem", "color": C["text"]},
                 ),
             ]),
         ], style={"display": "flex", "gap": "40px", "flexWrap": "wrap"}),
@@ -239,6 +276,7 @@ def render(cd: CardData) -> html.Div:
                  style={"color": C["muted"], "fontSize": "0.84rem", "marginBottom": "12px"}),
         filters,
         bar_for(cd, "infringement", 56),
-        html.Div(build_list(cd, "56", [s[0] for s in SEV_INFO], all_codes, ["on"]),
+        html.Div(build_list(cd, "56", [s[0] for s in SEV_INFO] + [WARN_INFO[0]], all_codes,
+                            ["on"]),
                  id="viol-list"),
     ])

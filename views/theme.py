@@ -276,3 +276,71 @@ EXTERNAL_STYLESHEETS = [
     # Google Fonts: Overpass (ispirato alla segnaletica stradale)
     "https://fonts.googleapis.com/css2?family=Overpass:wght@400;500;600;700;800;900&display=swap",
 ]
+
+
+# ── Tema chiaro / scuro ───────────────────────────────────────────────────────────
+# Gli stili inline usano i colori esadecimali di C. Al momento di inviarli al
+# browser i colori della palette diventano variabili CSS (definite in style.css per
+# il tema chiaro e per quello scuro): così i componenti non cambiano e il tema si
+# commuta con l'attributo data-theme di <html>, senza ridisegnare le pagine.
+# I grafici Plotly restano esadecimali e sono ricolorati da style.css.
+import re as _re
+
+_HEX_VAR = {
+    "#E8EBE6": "--carta", "#DDE1DA": "--carta-2", "#F6F7F4": "--superficie",
+    "#FFFFFF": "--bianco", "#C9CFC7": "--filetto", "#23272C": "--inchiostro",
+    "#5E666D": "--grigio", "#00653A": "--verde", "#004D2C": "--verde-2",
+    "#1D4F91": "--blu", "#B3261E": "--guida", "#B07A00": "--ocra",
+    "#C1121F": "--rosso",
+}
+_HEX_RE = _re.compile(r"#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?\b")
+_TEXT_KEYS = {"color"}          # su queste proprietà il bianco è testo su fondo colorato
+
+
+def _themed(value: str, key: str) -> str:
+    def sub(m):
+        hex6 = "#" + m.group(1).upper()
+        var = _HEX_VAR.get(hex6)
+        if var is None:
+            return m.group(0)
+        if hex6 == "#FFFFFF" and key in _TEXT_KEYS:
+            var = "--su-colore"
+        if m.group(2):                                   # colore + alfa (es. "22")
+            pct = round(int(m.group(2), 16) * 100 / 255)
+            return f"color-mix(in srgb, var({var}) {pct}%, transparent)"
+        return f"var({var})"
+    return _HEX_RE.sub(sub, value)
+
+
+def _theme_walk(obj, key=""):
+    if isinstance(obj, str):
+        return _themed(obj, key) if "#" in obj else obj
+    if isinstance(obj, dict):
+        return {k: _theme_walk(v, k) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_theme_walk(v, key) for v in obj]
+    return obj
+
+
+def install_theme_vars():
+    """Converte i colori della palette negli stili (style, style_cell, labelStyle…)
+    in variabili CSS e traduce i testi visibili nella lingua scelta (views/i18n)."""
+    from dash.development.base_component import Component
+    if getattr(Component, "_tv_themed", False):
+        return
+    original = Component.to_plotly_json
+
+    def to_plotly_json(self):
+        out = original(self)
+        props = out.get("props")
+        if props:
+            from views.i18n import translate_props
+            translate_props(out.get("type", ""), props)
+            for k, v in props.items():
+                if v and (k.startswith("style") or k.endswith("_style")
+                          or k.endswith("Style")):
+                    props[k] = _theme_walk(v)
+        return out
+
+    Component.to_plotly_json = to_plotly_json
+    Component._tv_themed = True

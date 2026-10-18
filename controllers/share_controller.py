@@ -95,9 +95,14 @@ def _build_attachments(cd: CardData, choices: List[str]) -> List[tuple]:
         # Se il file è nell'archivio, usa quello; altrimenti ricostruisce un DDD sintetico
         raw = archive.get_bytes(matching.filename) if matching else _rebuild_ddd_bytes(cd)
         if raw:
-            # Nome file nel formato standard dei DDD: C_DATA_COGNOME_CARTA.DDD
-            ts    = (cd.driver.last_download or "").replace("/", "-").replace(" ", "_").replace(":", "")
-            fname = f"C_{ts}_{cd.driver.surname}_{cd.driver.card_number}.DDD"
+            # Nome file nel formato standard dei DDD (stesso costruttore dell'archivio)
+            from datetime import datetime as _dt
+            from services.archive_service import ddd_filename
+            try:
+                when = _dt.strptime(cd.driver.last_download, "%d/%m/%Y %H:%M")
+            except (TypeError, ValueError):
+                when = None
+            fname = matching.filename if matching else ddd_filename(cd.driver, when)
             attachments.append((fname, raw))
 
     if "pdf_act" in choices:

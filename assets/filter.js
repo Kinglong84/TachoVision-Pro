@@ -193,7 +193,7 @@
         var counter = document.getElementById(targetId + "-count");
         if (counter) {
             if (hasFilter) {
-                counter.textContent = visible + " risultati";
+                counter.textContent = visible + " " + ((window.TV_TEXT || {})["risultati"] || "risultati");
                 counter.style.display = "inline";
             } else {
                 /* Nessun filtro attivo: nascondi il badge */

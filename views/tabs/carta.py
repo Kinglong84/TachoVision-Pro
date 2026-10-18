@@ -14,6 +14,7 @@ Layout: 3 colonne Bootstrap nella riga superiore (titolare | carta | download),
         poi eventi+guasti affiancati, poi condizioni speciali.
 """
 
+from models.settings import card_display
 from dash import html
 import dash_bootstrap_components as dbc
 
@@ -99,6 +100,27 @@ def _conditions_table(cd: CardData) -> html.Div:
     ], className="veh-table")
 
 
+def card_extremes(cd: CardData) -> dict:
+    """Prima/ultima attività, primo inserimento/ultimo prelievo della carta, primo/
+    ultimo luogo registrato (ora locale "DD/MM/YY HH:MM")."""
+    from models.settings import load_settings
+    from models.timeline import Timeline
+    tl = Timeline(cd.activities, load_settings().timezone)
+    fmt = lambda m: tl.fmt(m) if m is not None else "—"
+    real = [s for s in tl.segments if not s.unknown]
+    cards = [t // 60 for v in cd.vehicle_sessions for t in (v.first_use_utc,) if t]
+    outs = [t // 60 for v in cd.vehicle_sessions for t in (v.last_use_utc,) if t]
+    places = [p.ts_utc // 60 for p in cd.places if p.ts_utc]
+    return {
+        "Prima attività": fmt(real[0].start if real else None),
+        "Ultima attività": fmt(real[-1].end if real else None),
+        "Primo inserimento della carta": fmt(min(cards) if cards else None),
+        "Ultimo prelievo della carta": fmt(max(outs) if outs else None),
+        "Primo codice paese": fmt(min(places) if places else None),
+        "Ultimo codice paese": fmt(max(places) if places else None),
+    }
+
+
 def render(cd: CardData) -> html.Div:
     """
     Costruisce la tab Carta con tutte le sezioni.
@@ -129,7 +151,7 @@ def render(cd: CardData) -> html.Div:
 
             # Colonna 2: dati carta tachigrafica
             dbc.Col(section("Carta tachigrafica",
-                info_row("Numero carta",    d.card_number, mono=True),
+                info_row("Numero carta",    card_display(d.card_number), mono=True),
                 # Generazione: "G1" (Reg. 3821/85) o "G2 (v1)" (Reg. 2016/799)
                 info_row("Generazione",     d.generation),
                 info_row("Indice rinnovo",  d.renewal_index),
@@ -149,6 +171,10 @@ def render(cd: CardData) -> html.Div:
                 info_row("Ultimo download",     d.last_download),
                 info_row("Download precedente", d.prev_download),
                 info_row("Compatibilità",       d.generation),
+                # estremi dei dati presenti sulla carta
+                html.Div("Dati sulla carta", className="section-title",
+                         style={"marginTop": "16px"}),
+                *[info_row(k, v) for k, v in card_extremes(cd).items()],
                 html.Div("File", className="section-title", style={"marginTop": "16px"}),
                 info_row("Nome file",   d.filename, mono=True),
                 # Dimensione del file DDD in byte (utile per debugging)

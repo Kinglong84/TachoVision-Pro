@@ -1,6 +1,6 @@
 # TachoVision Pro
 
-![Versione](https://img.shields.io/badge/versione-0.2.0--beta-orange)
+![Versione](https://img.shields.io/badge/versione-0.3.0--beta-orange)
 ![Python](https://img.shields.io/badge/python-3.10--3.13-blue)
 ![License](https://img.shields.io/badge/licenza-uso%20personale-lightgrey)
 
@@ -22,45 +22,50 @@ inventato MARIO ROSSI): nessun dato reale.</sub>
 
 ---
 
-## Novità della versione 0.2.0
+## Novità della versione 0.3.0
 
-- **Nuovo aspetto "Carta disco"**: tema chiaro ispirato al disco del cronotachigrafo e alla
-  segnaletica stradale; la Dashboard mostra la giornata su un **disco 24 ore**, con il
-  verdetto in parole semplici e la guida ancora disponibile.
-- **Motore delle infrazioni riscritto** su una linea del tempo continua: 33 tipi di
-  infrazione, gravità **MI / SI / VSI / MSI** secondo il Reg. UE 2016/403, regole italiane
-  (lavoro notturno, pause ogni 6 ore), filtri per periodo, gravità e tipo.
-- **Storico del conducente**: gli scarichi precedenti della stessa persona in archivio
-  vengono uniti per le infrazioni e la pianificazione, con avviso per i **dati mancanti** tra
-  un file e l'altro e controllo dello **scarico entro 28 giorni**.
-- **Nuove regole**: due riposi settimanali ridotti consecutivi all'estero (deroga dal
-  20/08/2020) e uso scorretto del commutatore traghetto/treno.
-- **Nuove schermate**: Periodi di riposo con compensazioni, Pianificazione (cosa si può
-  ancora fare e "macchina del tempo"), Riepilogo del tempo di lavoro per giorno o turno,
-  Paesi visitati, Utilizzo del veicolo, Impostazioni complete.
-- **Dati inseriti a mano**: note, ferie e attività svolte senza carta, usate in tutti i calcoli.
-- **Export rifatti**: PDF disegnati su pagina A4 (grafico 24 ore di ogni giorno, firme in
-  fondo al rapporto infrazioni) ed Excel per attività, tempo di lavoro, veicoli, posizioni GPS
-  e paesi.
-- **Archivio**: backup e ripristino su file, zip per conducente, recupero dei file presenti
-  nella cartella, nessuna copia doppia; promemoria dei 28 giorni e backup automatico settimanale.
-- **Prova senza carta**: pulsante **"Prova con dati di esempio"** nella schermata iniziale.
-- Correzioni del lettore `.DDD`: giorno dello scarico, tabella delle nazioni, tipo di luogo
-  (inizio/fine), condizioni speciali (fuori ambito, traghetto/treno), sessioni dei veicoli.
+- **Tema scuro** (oppure automatico, come il sistema) e **26 lingue** dell'interfaccia:
+  italiano, inglese, tedesco, francese, spagnolo, portoghese, olandese, polacco, rumeno,
+  ceco, slovacco, sloveno, croato, serbo, ungherese, bulgaro, greco, russo, ucraino, turco,
+  svedese, danese, norvegese, finlandese, estone, lettone e lituano.
+- **Lettura della carta completa** per le carte di seconda generazione: vengono copiate
+  entrambe le parti della carta (Gen1 e Gen2) con certificati e **firme digitali**, così il
+  file `.DDD` è valido anche per i controlli. Barra di avanzamento durante la lettura,
+  consigli se il lettore non viene trovato e **scrittura della data di scarico** sulla carta.
+- **Nome del file standard**: `C_<data UTC>_<iniziale>_<COGNOME>_<numero carta>.DDD`.
+- **Dati Gen2 uniti**: luoghi, veicoli (con numero di telaio), eventi e guasti della parte
+  Gen2 della carta si uniscono a quelli della parte Gen1, senza doppioni.
+- **Carte Gen2 versione 2**: attraversamenti di **frontiera** e operazioni di **carico e
+  scarico merce**, con data, paese e posizione GPS.
+- **Posizioni GPS corrette**: le coordinate erano lette con un'unità sbagliata e i punti
+  finivano a decine di chilometri dal posto giusto.
+- **Nomi con caratteri speciali**: nomi e autorità con le lettere delle altre lingue
+  europee (greco, cirillico, lettere accentate) vengono letti correttamente.
+- **Scelta dei riposi più favorevole** al conducente quando un riposo può contare in più
+  modi; nuove regole: spostamenti senza veicolo registrato, simbolo del paese al valico di
+  frontiera, superamento consentito dall'Art. 12, guida notturna nei servizi bus.
+- **Secondo conducente**: lette anche le attività registrate con la carta nello slot 2.
+- **Infrazioni raggruppate per tipo**, anche nel PDF, con scelta dei campi firma; controllo
+  del lavoro continuo (max 6 ore) in Pianificazione; mappa GPS punto per punto.
+- **Invii cloud non persi**: se la rete manca il file resta in coda e viene inviato al
+  successivo avvio.
+- **Cartella di salvataggio** a scelta per una copia di ogni carta letta e opzione per
+  **mascherare il numero di carta** nelle schermate e nei PDF.
+
+### Versione 0.2.0
+
+- Nuovo aspetto "Carta disco" con il **disco 24 ore** nella Dashboard.
+- Motore delle infrazioni su linea del tempo continua, gravità **MI / SI / VSI / MSI**
+  (Reg. UE 2016/403), regole italiane, filtri per periodo, gravità e tipo.
+- Storico del conducente (unione degli scarichi, dati mancanti, scarico entro 28 giorni).
+- Schermate Periodi di riposo, Pianificazione, Riepilogo del tempo di lavoro, Paesi
+  visitati, Utilizzo del veicolo, Impostazioni complete; dati inseriti a mano.
+- Export PDF ed Excel rifatti; archivio con backup, ripristino e zip; dati di esempio.
 
 ### In arrivo
 
-Lo sviluppo continua. Nelle prossime versioni:
-
-- scelta automatica della combinazione di riposi più favorevole al conducente;
-- nuove regole: spostamenti senza veicolo registrato, simbolo del paese al valico di
-  frontiera, superamento consentito dall'Art. 12, guida notturna nei servizi bus;
-- attività registrate con la carta nello slot del secondo conducente (equipaggio);
-- infrazioni raggruppate per tipo, anche nel PDF, con scelta dei campi firma;
-- informazioni carta più complete e controllo del lavoro continuo (max 6 ore) in Pianificazione;
-- mappa GPS con navigazione punto per punto;
-- tema scuro e altre lingue dell'interfaccia;
-- lettura dei file scaricati dal **tachigrafo del veicolo** (velocità, superamenti, calibrazioni).
+- lettura dei file scaricati dal **tachigrafo del veicolo** (velocità, superamenti,
+  calibrazioni, attività di tutti i conducenti).
 
 ---
 
@@ -91,11 +96,11 @@ Lo sviluppo continua. Nelle prossime versioni:
 | **Attività** | Elenco e grafico per giorno, inserimento/estrazione carta, paesi, eventi, dati manuali |
 | **Riepilogo** | Tempo di lavoro per giorno o turno, settimanale o mensile, pause retribuite, fascia oraria maggiorata |
 | **Veicoli** | Sessioni di guida per veicolo con odometro, km, riepiloghi e mappa GPS |
-| **Luoghi** | Paesi visitati con ore e distanze, registro luoghi con coordinate GNSS |
+| **Luoghi** | Paesi visitati con ore e distanze, luoghi con coordinate GNSS, frontiere e carico/scarico (Gen2 v2) |
 | **Carta** | Titolare, carta, patente, emissione, eventi e guasti registrati |
 | **Archivio** | File `.DDD` salvati, promemoria 28 giorni, backup/ripristino, zip, storico conducente |
 | **Report & Export** | Invio con il client e-mail, upload su Google Drive / OneDrive / Dropbox |
-| **Impostazioni** | Lingua, fuso orario, paese base, legislazione, retribuzione, colori, formati |
+| **Impostazioni** | 26 lingue, tema chiaro/scuro, fuso orario, paese base, legislazione, retribuzione, colori, formati |
 
 **Export** (con periodo Dal/Al): PDF Attività (anche solo grafico), Riepilogo del tempo di
 lavoro, Utilizzo del veicolo, Paesi visitati, Periodi di riposo, Infrazioni; Excel (CSV con
@@ -213,9 +218,13 @@ e alcune infrazioni tipiche.
 
 1. Inserisci la carta nel lettore USB collegato al PC
 2. Clicca **"Leggi Carta"** (oppure attiva la lettura automatica nelle Impostazioni)
-3. Attendi il completamento della lettura (10-30 secondi)
+3. Attendi il completamento della lettura (10-60 secondi): accanto al pulsante si vede
+   il punto a cui è arrivata
 
-Il file viene salvato automaticamente nell'archivio locale.
+Il file viene salvato automaticamente nell'archivio locale (e, se scelta, anche in una
+cartella a parte). Per le carte Gen2 vengono lette entrambe le parti, con le firme digitali.
+Con l'opzione **"Timestamp della carta"** (attiva di base) la carta registra la data della
+lettura, come dopo uno scarico ufficiale.
 
 ### Navigazione
 
@@ -301,7 +310,9 @@ tachovision-pro/
 │   ├── manual_data.py          ← note, ferie e attività inserite a mano
 │   ├── settings.py             ← impostazioni
 │   └── demo_data.py            ← dati di esempio inventati
+├── locales/                    ← testi dell'interfaccia nelle 26 lingue
 ├── views/
+│   ├── i18n.py                 ← traduzione dell'interfaccia
 │   ├── theme.py                ← colori e caratteri del tema "Carta disco"
 │   ├── charts.py               ← grafici (disco 24 ore, giornate, riepiloghi)
 │   └── tabs/                   ← una schermata = un file Python

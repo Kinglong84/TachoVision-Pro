@@ -23,6 +23,7 @@ from typing import List, Optional
 from models.settings import Settings, load_settings
 from models.timeline import (AVAIL, DRIVE, REST, WORK, Rest, Timeline, build_shifts,
                              classify_rests)
+from models.rest_optimizer import rests_for
 
 H = 60
 
@@ -141,7 +142,7 @@ def build_report(activities, cd=None, settings: Settings = None) -> RestReport:
     tl = Timeline(activities, s.timezone)
     if not tl.segments:
         return RestReport()
-    rests = [r for r in classify_rests(tl) if r.length > 0]
+    rests = [r for r in rests_for(tl, s) if r.length > 0]
     shifts = build_shifts(tl, rests)
     comp = _compensations(tl, rests, s.firstdayofweek)
     fmt = s.intervalformat

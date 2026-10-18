@@ -227,6 +227,9 @@ SPEC: List[SettingSpec] = [
     SettingSpec("automaticread", "accessories",
                 "A partire se il lettore di schede è rilevabile", "bool", False,
                 on_text="Acceso", off_text="Spento"),
+    SettingSpec("savefolder", "accessories", "Cartella di salvataggio degli scarichi", "text", "",
+                help="Ogni carta letta viene copiata anche qui (es. Download o una chiavetta). "
+                     "Vuoto = solo archivio"),
     SettingSpec("email", "accessories", "Destinatario principale delle e-mail", "text", ""),
     SettingSpec("automaticsend", "accessories", "Invio automatico dopo la lettura", "bool",
                 False, on_text="Acceso", off_text="Spento"),
@@ -234,6 +237,12 @@ SPEC: List[SettingSpec] = [
                 [(0, "Virgola"), (1, "Punto e virgola")]),
 
     # Aspetto
+    SettingSpec("thememode", "design", "Tema chiaro/scuro", "select", "SYSTEM",
+                [("LIGHT", "Chiaro"), ("DARK", "Scuro"), ("SYSTEM", "Sistema")],
+                help="Sistema = segue il tema chiaro/scuro del computer"),
+    SettingSpec("maskcardnumber", "design", "Numero carta mascherato", "bool", False,
+                on_text="Il numero carta si vede come ****1234",
+                off_text="Il numero carta si vede per intero"),
     SettingSpec("intervalformat", "design", "Formato della durata", "select", "HHMM",
                 [("HHMM", "oo:mm  (04:30 = 04.50)"), ("HHHH", "oo.oo  (04.50 = 04:30)")]),
     SettingSpec("distanceunit", "design", "Unità di distanza", "select", "KILOMETER",
@@ -341,3 +350,14 @@ def save_settings(settings: Settings, path: Path = None) -> None:
 def default_settings() -> Settings:
     """"""
     return Settings({})
+
+
+def card_display(number: str) -> str:
+    """Numero carta per l'interfaccia e i PDF: "****1234" se l'impostazione
+    "Numero carta mascherato" è attiva (utile per condividere schermate)."""
+    number = number or ""
+    try:
+        masked = load_settings().maskcardnumber
+    except Exception:
+        masked = False
+    return f"****{number[-4:]}" if masked and len(number) > 4 else number

@@ -41,7 +41,7 @@ SEVERITIES = [MSI, VSI, SI, MI]
 # Compatibilità con il codice esistente (stat-card e PDF)
 SEV_VERY, SEV_HIGH, SEV_LOW = VSI, SI, MI
 
-# Date normative
+# Date normative (q10)
 MOBILITY_PACKAGE = datetime(2020, 8, 20)      # Reg. UE 2020/1054
 BUS_SPLIT_BREAK = datetime(2024, 5, 22)       # pause frazionate bus occasionali
 
@@ -188,7 +188,7 @@ def classify(code: str, value_min: int, no_msi: bool = False) -> Optional[str]:
     return None
 
 
-# Pesi di penalità — usati per scegliere l'interpretazione migliore
+# Pesi di penalità (li.c) — usati per scegliere l'interpretazione migliore
 PENALTY = {MI: 500, SI: 1000, VSI: 6000, MSI: 9000}
 
 
@@ -205,7 +205,9 @@ class _Ctx:
         self.tl = Timeline(activities, settings.timezone)
         self.out: List[Violation] = []
         _mode_incorrect_use(self)          # va prima: riclassifica segmenti come riposo
-        self.rests: List[Rest] = classify_rests(self.tl)
+        # riposi settimanali scelti a penalità minima (models/rest_optimizer.py)
+        from models.rest_optimizer import rests_for
+        self.rests: List[Rest] = rests_for(self.tl, settings)
         self.shifts: List[Shift] = build_shifts(self.tl, self.rests)
 
     def dur(self, m: int) -> str:
@@ -257,10 +259,44 @@ class _Ctx:
 
 # ── Regole ───────────────────────────────────────────────────────────────────
 
+def _bus_derogation_periods(c: _Ctx) -> List[tuple]:
+    """Periodi in cui un conducente di bus usa la deroga dei 12 giorni (Art. 8§6a):
+    dalla fine di un riposo settimanale all'inizio del successivo, se tra i due
+    passano più di 6 periodi di 24 ore."""
+    if not c.s.isbus:
+        return []
+    weekly = [r for r in c.rests if r.weekly]
+    return [(a.end, b.start) for a, b in zip(weekly, weekly[1:]) if b.start - a.end > 144 * H]
+
+
+def _night_overlap(c: _Ctx, a: int, b: int) -> bool:
+    """Il periodo tocca la fascia 22:00-06:00 (ora locale)."""
+    d = c.tl.local(a).date() - timedelta(days=1)
+    while True:
+        start = c.tl.to_minute(datetime(d.year, d.month, d.day, 22, tzinfo=c.tl.tz))
+        if start >= b:
+            return False
+        if min(b, start + 8 * H) > max(a, start):
+            return True
+        d += timedelta(days=1)
+
+
 def _continuous_driving(c: _Ctx):
     """Art. 7 — guida ininterrotta > 4h30 senza pausa di 45 min (o 15 + 30).
-    Le pause consecutive si sommano; un'infrazione per ogni blocco di guida."""
+    Le pause consecutive si sommano; un'infrazione per ogni blocco di guida.
+    Bus in deroga 12 giorni (Art. 8§6a): guida da solo tra le 22 e le 6 oltre
+    3 ore prima della pausa → NightDrivingBus (al posto della guida continua)."""
+    derog = _bus_derogation_periods(c)
+
+    def close(first, last, drive, solo):
+        if derog and solo and drive > 180 and _night_overlap(c, first, last)                 and any(min(last, b) > max(first, a) for a, b in derog):
+            c.add("NightDrivingBus", first, last, drive, 180,
+                  "Tempo di guida notturno prima della pausa")
+        elif drive > 270:
+            c.add("ContinuousDriving", first, last, drive, 270, "Tempo di guida continuo")
+
     drive = 0
+    solo = False
     first = last = None
     had15 = False
     big1 = big2 = 0                 # le due pause più lunghe (regola bus 2024)
@@ -270,7 +306,9 @@ def _continuous_driving(c: _Ctx):
         if seg.activity == DRIVE:
             if drive == 0:
                 first = seg.start
+                solo = False
             drive += seg.length
+            solo = solo or seg.solo
             last = seg.end
             brk = 0
             continue
@@ -289,14 +327,22 @@ def _continuous_driving(c: _Ctx):
         bus_rule = (c.s.isbus and c.tl.local(seg.start).replace(tzinfo=None) >= BUS_SPLIT_BREAK
                     and big1 + big2 >= 45)
         if brk >= 45 or (brk >= 30 and had15) or bus_rule:
-            if drive > 270:
-                c.add("ContinuousDriving", first, last, drive, 270,
-                      "Tempo di guida continuo")
+            if drive > 0:
+                close(first, last, drive, solo)
             drive, had15, big1, big2 = 0, False, 0, 0
         elif brk >= 15 and drive > 0:
             had15 = True
-    if drive > 270:
-        c.add("ContinuousDriving", first, last, drive, 270, "Tempo di guida continuo")
+    if drive > 0:
+        close(first, last, drive, solo)
+
+
+def _art12(c: _Ctx, r: Optional[Rest], need: int = 0) -> bool:
+    """Art. 12 (dal 20/08/2020): il turno finisce con un riposo settimanale nel
+    paese di base (rientro a casa) lungo più di `need` minuti → possibile deroga."""
+    if r is None or not r.weekly or r.length <= need:
+        return False
+    limit = c.tl.to_minute(MOBILITY_PACKAGE.replace(tzinfo=c.tl.tz))
+    return r.start > limit and _rest_country(c, r) in ("", c.s.basecountry)
 
 
 def _day_driving(c: _Ctx):
@@ -318,7 +364,9 @@ def _day_driving(c: _Ctx):
             code, lim = "DayDriving_9", 9 * H
         else:
             continue
-        c.add(code, first, last, drive, lim, "Tempo di guida", no_msi=no_msi)
+        # Art. 12: superamento per raggiungere casa per il riposo settimanale
+        note = "overdrive" if drive <= 11 * H and _art12(c, sh.rest_after) else ""
+        c.add(code, first, last, drive, lim, "Tempo di guida", no_msi=no_msi, note=note)
 
 
 def _weekly_driving(c: _Ctx):
@@ -335,7 +383,9 @@ def _weekly_driving(c: _Ctx):
     for i, k in enumerate(keys):
         end = keys[i + 1] if i + 1 < len(keys) else c.week_of(k + 8 * 24 * H)
         if weeks[k] > 56 * H:
-            c.add("WeekDriving_one", k, end - 1, weeks[k], 56 * H, "Tempo di guida")
+            limit = c.tl.to_minute(MOBILITY_PACKAGE.replace(tzinfo=c.tl.tz))
+            note = "overdrive" if weeks[k] <= 58 * H and k > limit else ""
+            c.add("WeekDriving_one", k, end - 1, weeks[k], 56 * H, "Tempo di guida", note=note)
         if i + 1 < len(keys):
             two = weeks[k] + weeks[keys[i + 1]]
             end2 = keys[i + 2] if i + 2 < len(keys) else c.week_of(keys[i + 1] + 8 * 24 * H)
@@ -350,6 +400,12 @@ def _daily_rest(c: _Ctx):
     for r in c.rests:
         if r.weekly:
             reduced = 0
+            # riposo settimanale iniziato oltre la finestra delle 24h: il riposo
+            # giornaliero è arrivato troppo tardi (Art. 12 se è il rientro a casa)
+            if not r.truncated and r.start > c.tl.start and r.in_window < 11 * H:
+                c.add("Rest_DailyNormal_Fine", r.start, r.end, r.in_window, 11 * H,
+                      "Periodo di riposo avviato troppo tardi",
+                      note="overrun" if _art12(c, r, 11 * H) else "")
             continue
         if r.truncated:
             continue
@@ -381,6 +437,12 @@ def _weekly_rest(c: _Ctx):
     weekly = [r for r in c.rests if r.weekly]
     limit = (288 if c.s.isbus else 144) * H
     code_late = "Weekly_TooLate_Bus" if c.s.isbus else "Weekly_TooLate"
+    # riposo settimanale ridotto sotto le 24h (può capitare con la scelta a
+    # penalità minima, che accetta come settimanali i riposi da 20h)
+    for r in weekly:
+        if r.kind == "WeeklyReduced" and not r.truncated and r.length < 24 * H:
+            c.add("Weekly_TooShort_24", r.start, r.end, r.length, 24 * H,
+                  "Periodo di riposo settimanale troppo breve")
     prev = None
     for r in weekly:
         if prev is not None:
@@ -815,7 +877,7 @@ def _ferry_button_invalid(c: _Ctx):
     last = segs[-1] if segs else None
     changes = [s.start for s in segs if s.activity in (DRIVE, WORK)]
 
-    def little_driving(begin, seg):           # guida ≤ 30 min prima del riposo
+    def little_driving(begin, seg):           # [oi.l] guida ≤ 30 min prima del riposo
         if seg.start <= begin:
             return True
         drv = sum(max(0, min(s.end, seg.start) - max(s.start, begin))
@@ -872,6 +934,83 @@ def _ferry_button_invalid(c: _Ctx):
                          "stato un riposo in una cabina (cuccetta)")
 
 
+def _virtual_travel(c: _Ctx):
+    """
+    Viaggio virtuale (solo paese base Polonia, gravità minore): il paese a fine
+    lavoro prima di un riposo (luogo tra -3h e +4h dall'inizio) e quello alla
+    ripresa (tra -4h e +1h dalla fine) sono diversi senza guida registrata in
+    mezzo, quindi il trasferimento non è stato registrato. Per i riposi di almeno
+    6 giorni conta il rientro nel paese di base. Non si segnala se accanto al
+    riposo c'è un inserimento manuale o se durante il riposo c'è un traghetto/treno.
+    """
+    base = c.s.basecountry
+    if base != "PL" or not c.cd:
+        return
+    places = sorted((m, p.country) for p in c.cd.places
+                    if (m := _utc_minute(p.datetime)) is not None and p.country)
+    if not places:
+        return
+    ferries = [b for b, _ in _ferry_pairs(c)]
+
+    def country_in(a, b):
+        found = ""
+        for m, k in places:
+            if a <= m <= b:
+                found = k
+        return found
+
+    def add(r, src, dst):
+        c.add("VirtualTravel", r.start, r.end, 0, 0, "", severity=MI,
+              detail="Probabilmente non hai inserito il periodo di pendolarismo nel "
+                     f"tachigrafo (|{src}| >>> |{dst}|)")
+
+    rests = [r for r in c.rests if r.length > 0 and not r.truncated]
+    for r in rests[:-1]:
+        before = c.tl.between(r.start - 1, r.start)
+        after = c.tl.between(r.end, r.end + 1)
+        manual_before = bool(before and before[0].manual)
+        manual_after = bool(after and after[0].manual)
+        end_c = country_in(r.start - 3 * H, r.start + 4 * H)
+        start_c = country_in(r.end - 4 * H, r.end + H)
+        if r.length >= 144 * H:
+            if end_c and end_c != base and not manual_before:
+                add(r, end_c, base)
+            if start_c and start_c != base and not manual_after:
+                add(r, base, start_c)
+        elif end_c and start_c and end_c != start_c and                 ((not manual_before and end_c != base) or (not manual_after and start_c != base))                 and not any(r.start <= f <= r.end for f in ferries):
+            add(r, end_c, start_c)
+
+
+BORDER_RULE = datetime(2022, 2, 2)             # Reg. UE 165/2014 Art. 34§7
+
+
+def _missing_country_code_border(c: _Ctx):
+    """
+    Simbolo del paese al valico di frontiera (dal 02/02/2022): nello stesso turno
+    (dalla fine di un riposo all'inizio del successivo, ±1h) due luoghi consecutivi
+    in paesi non confinanti né collegati da traghetto indicano che almeno un
+    attraversamento non è stato registrato. Dettaglio "IT|/???/|DE".
+    """
+    if not c.cd:
+        return
+    from models.borders import NOT_CHECKED, neighbours
+    places = sorted((m, p.country) for p in c.cd.places
+                    if (m := _utc_minute(p.datetime)) is not None and p.country)
+    if len(places) < 2:
+        return
+    since = int(BORDER_RULE.replace(tzinfo=timezone.utc).timestamp() // 60)
+    rests = [r for r in c.rests if r.length > 0]
+    for prev, nxt in zip(rests, rests[1:]):
+        a, b = prev.end - H, nxt.start + H
+        if a <= since:
+            continue
+        inside = [x for x in places if a <= x[0] <= b]
+        for (m1, k1), (m2, k2) in zip(inside, inside[1:]):
+            if not neighbours(k1, k2) and k1 not in NOT_CHECKED and k2 not in NOT_CHECKED:
+                c.add("Missing_CountryCode_Border", prev.end, nxt.start, 0, 0, "",
+                      severity=MI, detail=f"{k1}|/???/|{k2}")
+
+
 def _data_gap(c: _Ctx):
     """buco tra due scarichi uniti nello storico:
     contato come riposo (models.history), segnalato come avvertenza."""
@@ -897,7 +1036,8 @@ def _card_download_28(c: _Ctx):
 RULES = [_continuous_driving, _day_driving, _weekly_driving, _daily_rest,
          _weekly_rest, _weekly_working, _night_and_continuous_work,
          _missing_manual_entry, _missing_country_code, _vehicle_check,
-         _rest45_in_vehicle, _weekly_international, _ferry_button_invalid,
+         _rest45_in_vehicle, _weekly_international, _ferry_button_invalid, _virtual_travel,
+         _missing_country_code_border,
          _data_gap, _card_download_28]
 
 
@@ -921,6 +1061,21 @@ def detect_violations(activities: List[DayActivity],
         rule(c)
     c.out.sort(key=lambda v: getattr(v, "_sort", 0))
     return c.out
+
+
+def rest_penalty(tl: Timeline, settings: Settings, weekly: Dict[int, bool],
+                 a: int, b: int) -> int:
+    """Somma delle penalità (MI 500 … MSI 9000) delle infrazioni su riposi e guida
+    giornaliera che iniziano tra a e b, con la scelta dei settimanali `weekly`."""
+    c = object.__new__(_Ctx)
+    c.s, c.cd, c.activities, c.tl, c.out = settings, None, None, tl, []
+    c.italy = settings.basecountry == "IT"
+    c.portugal = settings.basecountry == "PT"
+    c.rests = classify_rests(tl, weekly=weekly)
+    c.shifts = build_shifts(tl, c.rests)
+    for rule in (_daily_rest, _weekly_rest, _day_driving):
+        rule(c)
+    return sum(PENALTY.get(v.severity, 0) for v in c.out if a <= getattr(v, "_sort", a) <= b)
 
 
 def violation_summary(violations: List[Violation]) -> Dict[str, int]:

@@ -36,7 +36,8 @@ from dash import dcc, html
 # dcc = Dash Core Components: componenti interattivi (Input, Upload, Graph, Store, ecc.)
 # html = Componenti HTML Dash: rappresentano tag HTML (Div, Span, Button, ecc.)
 
-from views.theme import C, btn_style, btn_ghost, EXTERNAL_STYLESHEETS
+from views.theme import C, btn_style, btn_ghost, EXTERNAL_STYLESHEETS, install_theme_vars
+install_theme_vars()   # colori della palette → variabili CSS (tema chiaro/scuro)
 # C = dizionario con i colori dell'app (palette dark)
 # btn_style = funzione che genera stili CSS per i bottoni
 # EXTERNAL_STYLESHEETS = lista di URL di fogli di stile esterni (Bootstrap, Google Fonts)
@@ -49,6 +50,10 @@ app = dash.Dash(
     title="TachoVision Pro",            # titolo mostrato nel browser (tab/barra del titolo)
     suppress_callback_exceptions=True,  # non generare errori per componenti creati dinamicamente
 )
+
+# traduce anche i testi restituiti dai callback
+from views.i18n import install_callback_translation
+install_callback_translation(app)
 
 # 'server' è l'oggetto Flask sottostante a Dash.
 # Serve per il deployment in produzione con gunicorn/waitress (server WSGI).
@@ -72,10 +77,16 @@ app.layout = html.Div([
     dcc.Store(id="store-card-status"),         # stato lettore (per polling)
     # controllo del lettore ogni 3 s
     dcc.Interval(id="card-poll", interval=3000, n_intervals=0),
+    # avanzamento della lettura carta: attivo solo mentre si legge (running del callback)
+    dcc.Interval(id="card-read-tick", interval=600, n_intervals=0, disabled=True),
     dcc.Store(id="store-gnss-date", data=None),  # data filtro mappa GPS (YYYY-MM-DD)
     dcc.Store(id="store-settings"),            # impostazioni salvate (aggiornato al salvataggio)
-    dcc.Store(id="store-manual-rev", data=0),
-    dcc.Store(id="store-wt-view"),             # vista del Riepilogo usata dall'export Excel/PDF  # cambia quando si modificano i dati manuali
+    dcc.Store(id="store-theme"),               # tema scelto: LIGHT / DARK / SYSTEM
+    html.Div(id="theme-sink", style={"display": "none"}),
+    dcc.Store(id="store-lang"),                # lingua dell'interfaccia + testi per i .js
+    html.Div(id="lang-sink", style={"display": "none"}),
+    dcc.Store(id="store-manual-rev", data=0),  # cambia quando si modificano i dati manuali
+    dcc.Store(id="store-wt-view"),             # vista del Riepilogo usata dall'export Excel/PDF
 
     # ── Download invisibili (dcc.Download) ────────────────────────────────────────
     # dcc.Download triggera il download di un file nel browser quando viene "riempito"
@@ -149,6 +160,9 @@ app.layout = html.Div([
                     "fontSize": "0.85rem",
                 },
             ),
+            # avanzamento della lettura: "File 12 di 41 · G2 · Places — COGNOME Nome · ****1234"
+            html.Span(id="card-read-status", className="card-read-status",
+                      style={"fontSize": "0.8rem", "color": C["muted"], "maxWidth": "360px"}),
 
             # Upload file .DDD
             # dcc.Upload è il componente Dash che gestisce il drag & drop
@@ -253,6 +267,11 @@ def _startup_backup():
         auto_backup_if_due()
     except Exception as e:   # il backup non deve mai impedire l'avvio
         logging.getLogger(__name__).warning("Backup automatico non riuscito: %s", e)
+    try:                     # invii cloud rimasti in coda dall'ultima volta
+        from services.cloud_service import retry_outbox
+        retry_outbox()
+    except Exception as e:
+        logging.getLogger(__name__).warning("Invii cloud in coda non riusciti: %s", e)
 
 import threading
 threading.Thread(target=_startup_backup, daemon=True).start()

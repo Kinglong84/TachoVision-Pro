@@ -102,7 +102,8 @@ def driver_badge(driver: dict, demo: bool) -> html.Div:
     """
     # Concatena nome + cognome, rimuove spazi iniziali/finali, default "—"
     name   = f"{driver.get('firstname','')} {driver.get('surname','')}".strip() or "—"
-    card_n = driver.get("card_number", "—")
+    from models.settings import card_display
+    card_n = card_display(driver.get("card_number", "")) or "—"
     expiry = driver.get("expiry_date", "—")
     suffix = " 🔵 DEMO" if demo else ""    # indicatore visivo modalità demo
 

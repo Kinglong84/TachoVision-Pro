@@ -18,6 +18,7 @@ Regole dei riposi (Reg. CE 561/2006, Art. 4 e 8):
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
@@ -178,14 +179,36 @@ class Timeline:
         return self.to_minute(datetime(d.year, d.month, d.day, tzinfo=self.tz))
 
     # ── Interrogazioni ────────────────────────────────────────────────────────
+    def window(self, start: int, end: int) -> "Timeline":
+        """Copia della timeline limitata a [start, end) (stessa zona oraria)."""
+        tl = object.__new__(Timeline)
+        tl.tz = self.tz
+        tl.segments = self.between(max(start, self.start), min(end, self.end))
+        tl.start = tl.segments[0].start if tl.segments else start
+        tl.end = tl.segments[-1].end if tl.segments else start
+        return tl
+
+    def _ends(self) -> List[int]:
+        """Fine di ogni segmento (ordinati, senza sovrapposizioni) per la ricerca
+        binaria; ricalcolata se la lista cambia."""
+        segs = self.segments
+        key = (id(segs), len(segs), segs[-1].end if segs else 0)
+        if getattr(self, "_ends_key", None) != key:
+            self._ends_cache = [s.end for s in segs]
+            self._ends_key = key
+        return self._ends_cache
+
     def between(self, start: int, end: int) -> List[Segment]:
         """Segmenti tagliati all'intervallo [start, end)."""
         out = []
-        for s in self.segments:
-            if s.end <= start or s.start >= end:
-                continue
-            out.append(Segment(max(s.start, start), min(s.end, end), s.activity,
-                               s.crew, s.manual, s.unknown))
+        segs = self.segments
+        i = bisect_right(self._ends(), start)
+        while i < len(segs) and segs[i].start < end:
+            s = segs[i]
+            if s.end > start:
+                out.append(Segment(max(s.start, start), min(s.end, end), s.activity,
+                                   s.crew, s.manual, s.unknown))
+            i += 1
         return out
 
     def minutes(self, start: int, end: int, *activities) -> int:
@@ -195,7 +218,11 @@ class Timeline:
         return [s for s in self.segments if s.activity == REST and s.length >= min_len]
 
 
-def classify_rests(tl: Timeline, max_reduced: int = 3) -> List[Rest]:
+WEEKLY_CANDIDATE = 20 * H    # riposi che possono valere come settimanali ridotti
+
+
+def classify_rests(tl: Timeline, max_reduced: int = 3,
+                   weekly: Optional[dict] = None) -> List[Rest]:
     """
     Individua i riposi giornalieri e settimanali sulla timeline.
 
@@ -211,8 +238,18 @@ def classify_rests(tl: Timeline, max_reduced: int = 3) -> List[Rest]:
 
     I ridotti oltre il 3° tra due settimanali vengono valutati come normali
     (DailyNormal con durata < 11h → infrazione).
+
+    weekly: scelta dei riposi settimanali {inizio del riposo: True/False} per i
+    riposi da 20h in su (vedi models/rest_optimizer.py); senza scelta è
+    settimanale ogni riposo di almeno 24h.
     """
+    def is_weekly(r) -> bool:
+        if weekly is not None and r.length >= WEEKLY_CANDIDATE and r.start in weekly:
+            return weekly[r.start]
+        return r.length >= WEEKLY_REDUCED
+
     rests_all = tl.rests(1)
+    rest_ends = [r.end for r in rests_all]
     out: List[Rest] = []
     if not rests_all:
         return out
@@ -222,7 +259,7 @@ def classify_rests(tl: Timeline, max_reduced: int = 3) -> List[Rest]:
     # Il primo riposo apre il primo turno. Se inizia con i dati la sua durata reale
     # è sconosciuta: viene registrato come troncato e non giudicato.
     at_start = first.start <= tl.start
-    if first.length >= WEEKLY_REDUCED:
+    if is_weekly(first):
         out.append(Rest(first.start, first.end,
                         "WeeklyNormal" if first.length >= WEEKLY_REGULAR or at_start
                         else "WeeklyReduced", first.length, truncated=at_start))
@@ -233,13 +270,17 @@ def classify_rests(tl: Timeline, max_reduced: int = 3) -> List[Rest]:
         crew = any(s.crew for s in tl.between(cursor, cursor + 30 * H) if s.activity == DRIVE)
         window = 30 * H if crew else 24 * H
         w_end = cursor + window
-        inside = [(r, min(r.end, w_end) - max(r.start, cursor))
-                  for r in rests_all if r.end > cursor and r.start < w_end]
+        inside = []
+        k = bisect_right(rest_ends, cursor)
+        while k < len(rests_all) and rests_all[k].start < w_end:
+            r = rests_all[k]
+            inside.append((r, min(r.end, w_end) - max(r.start, cursor)))
+            k += 1
 
         chosen = None
         split_part = None
         for r, dur in inside:
-            if r.length >= WEEKLY_REDUCED:
+            if is_weekly(r):
                 chosen = (r, dur, "weekly")
                 break
             if dur >= DAILY_REDUCED:
@@ -262,7 +303,7 @@ def classify_rests(tl: Timeline, max_reduced: int = 3) -> List[Rest]:
             tail = next((r for r, _ in inside if r.end >= tl.end and r.length >= SPLIT_FIRST), None)
             if tail:
                 out.append(Rest(tail.start, tail.end,
-                                "WeeklyNormal" if tail.length >= WEEKLY_REDUCED else "DailyNormal",
+                                "WeeklyNormal" if is_weekly(tail) else "DailyNormal",
                                 tail.length, truncated=True))
             break
 
@@ -271,7 +312,7 @@ def classify_rests(tl: Timeline, max_reduced: int = 3) -> List[Rest]:
             if kind == "weekly":
                 truncated = r.end >= tl.end
                 kind = "WeeklyNormal" if r.length >= WEEKLY_REGULAR or truncated else "WeeklyReduced"
-                out.append(Rest(r.start, r.end, kind, r.length, truncated=truncated))
+                out.append(Rest(r.start, r.end, kind, dur, truncated=truncated))
                 reduced = 0
             else:
                 if kind == "DailyReduced":
@@ -296,8 +337,8 @@ def classify_rests(tl: Timeline, max_reduced: int = 3) -> List[Rest]:
                 break
             cursor = nxt.end
             out.append(Rest(nxt.start, nxt.end,
-                            "WeeklyNormal" if nxt.length >= WEEKLY_REGULAR else
-                            "WeeklyReduced" if nxt.length >= WEEKLY_REDUCED else "DailyNormal",
+                            "DailyNormal" if not is_weekly(nxt) else
+                            "WeeklyNormal" if nxt.length >= WEEKLY_REGULAR else "WeeklyReduced",
                             nxt.length))
     return out
 

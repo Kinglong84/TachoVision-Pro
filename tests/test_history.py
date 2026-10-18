@@ -1,5 +1,5 @@
 """
-Storico unito del conducente:
+Storico unito del conducente (DddExpander / DddDownloadChecker):
 unione degli scarichi, "Dati mancanti" (DataGap) e scarico oltre 28 giorni.
 Dati fittizi (MARIO ROSSI).
 """

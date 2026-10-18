@@ -68,3 +68,45 @@ def register(app):
         if n:
             return None
         raise PreventUpdate
+
+
+    # ── 3. Navigatore della mappa (primo / prec. / adatta / succ. / ultimo / livello) ──
+    @app.callback(
+        Output("gnss-map", "figure"),
+        Output("gnss-view", "data"),
+        Output("gnss-caption", "children"),
+        Output("gnss-layer", "children"),
+        Input("gnss-first", "n_clicks"),
+        Input("gnss-prev", "n_clicks"),
+        Input("gnss-fit", "n_clicks"),
+        Input("gnss-next", "n_clicks"),
+        Input("gnss-last", "n_clicks"),
+        Input("gnss-layer", "n_clicks"),
+        State("gnss-points", "data"),
+        State("gnss-view", "data"),
+        prevent_initial_call=True,
+    )
+    def navigate_map(_f, _p, _a, _n, _l, _y, points, view):
+        from views.tabs.luoghi import gnss_figure
+        if not points:
+            raise PreventUpdate
+        trig = callback_context.triggered[0]["prop_id"].split(".")[0]
+        view = dict(view or {"idx": None, "layer": "strade"})
+        idx, last = view.get("idx"), len(points) - 1
+        if trig == "gnss-first":
+            idx = 0
+        elif trig == "gnss-last":
+            idx = last
+        elif trig == "gnss-prev":
+            idx = last if idx is None else max(0, idx - 1)
+        elif trig == "gnss-next":
+            idx = 0 if idx is None else min(last, idx + 1)
+        elif trig == "gnss-fit":
+            idx = None
+        elif trig == "gnss-layer":
+            view["layer"] = "strade" if view.get("layer") == "satellite" else "satellite"
+        view["idx"] = idx
+        caption = (f"{len(points)} punti" if idx is None
+                   else f"{idx + 1}/{len(points)} · {points[idx]['time']}")
+        label = "Strade" if view["layer"] == "satellite" else "Satellite"
+        return gnss_figure(points, idx, view["layer"]), view, caption, label

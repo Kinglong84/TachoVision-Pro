@@ -31,6 +31,7 @@ from typing import List, Optional
 from models.settings import Settings, load_settings
 from models.timeline import (AVAIL, DRIVE, REST, WORK, Segment, Timeline, build_shifts,
                              classify_rests)
+from models.rest_optimizer import rests_for
 
 H = 60
 
@@ -117,7 +118,7 @@ def build_plan(activities, settings: Settings = None, mode: str = None,
         base = _simulate(base, "rest", ref - base.end)
     tl = _simulate(base, mode, minutes)
     now = tl.end
-    rests = [r for r in classify_rests(tl) if r.length > 0]
+    rests = [r for r in rests_for(tl, s) if r.length > 0]
     shifts = build_shifts(tl, rests)
     fmt = tl.fmt
 
@@ -174,7 +175,7 @@ def build_plan(activities, settings: Settings = None, mode: str = None,
               day_drive, day_limit),
         Gauge("Settimanale (max 56 ore)", week_drive, 56 * H),
         Gauge("Quindicinale (max 90 ore)", two_drive, 90 * H),
-        Gauge("Guida continua (max 4,5 ore)", cont, 270),
+        Gauge("Continuo (max 4,5 ore)", cont, 270),
     ]
 
     # ── Orario di lavoro ────────────────────────────────────────────────────
@@ -201,7 +202,16 @@ def build_plan(activities, settings: Settings = None, mode: str = None,
             if ns <= h0 < ne or ns <= h1 < ne:
                 night = True
                 break
+    # lavoro continuo dall'ultima pausa di almeno 15 minuti (Dir. 2002/15 Art. 5)
+    cont_work = 0
+    for x in tl.between(shift_start, now):
+        if x.activity in (DRIVE, WORK):
+            cont_work += x.length
+        elif x.length >= 15 and (x.activity == REST or
+                                 (x.activity == AVAIL and (x.crew or s.availibilityisbreak))):
+            cont_work = 0
     plan.working = [
+        Gauge("Continuo (max 6 ore)", cont_work, 6 * H),
         Gauge(f"Settimanale (max 60:00)", week_work, 60 * H),
         Gauge(f"Media {n} settimane (massimo 48 ore)", avg, 48 * H),
         Gauge("Ogni giorno" + (" (massimo 10 ore)" if night and not s.dailyworkinglimitbynightwork else ""),

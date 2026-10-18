@@ -61,6 +61,7 @@ class ActivityChange:
     manual: bool = False  # True = carta non inserita, attività inserita a mano
     crew: bool = False    # True = guida in equipaggio (multipresenza), carta inserita
     card_inserted: bool = True  # False = periodo con carta non inserita
+    slot2: bool = False   # True = carta nello slot del secondo conducente (bit 15)
 
 
 @dataclass
@@ -476,6 +477,10 @@ class CardData:
     history_files: list = field(default_factory=list)   # scarichi uniti
     card_downloads: list = field(default_factory=list)  # [[precedente, scarico, giorni]]
     place_ranges: list = field(default_factory=list)    # [[da, a]] coperti dai luoghi
+    # Carte Gen2 v2 (EF 0528 / 0529): dict con datetime, date, ts_utc, lat, lon, odometer_km
+    # e country_left/country_entered (frontiere) oppure operation (carico/scarico)
+    border_crossings: list = field(default_factory=list)
+    load_unload: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """
@@ -560,6 +565,7 @@ class CardData:
                 gnss_lat=p.get("gnss_lat"),        # None se non presente
                 gnss_lon=p.get("gnss_lon"),
                 gnss_accuracy=p.get("gnss_accuracy", 0),
+                ts_utc=p.get("ts_utc", 0), manual=p.get("manual", False),
             ))
 
         # Ricostruisce eventi e fault
@@ -577,6 +583,8 @@ class CardData:
             cd.rest_periods.append(RestPeriod(**r))
         for w in d.get("weekly_summary", []):
             cd.weekly_summary.append(WeekSummary(**w))
+        cd.border_crossings = list(d.get("border_crossings", []))
+        cd.load_unload = list(d.get("load_unload", []))
 
         # note, ferie e attività manuali del
         # conducente (~/TachoVision/manuale/<carta>.json) entrano in tutti i calcoli

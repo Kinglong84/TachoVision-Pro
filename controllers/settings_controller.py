@@ -16,7 +16,7 @@ from dash import ALL, MATCH, Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 
 from models.settings import (SPEC_BY_KEY, Settings, coerce, default_settings,
-                             save_settings)
+                             load_settings, save_settings)
 from views.tabs.impostazioni import worktime_formula
 
 
@@ -25,6 +25,71 @@ def _collect(values, ids) -> Settings:
 
 
 def register(app):
+
+    @app.callback(
+        Output("store-theme", "data"),
+        Input("store-settings", "data"),
+    )
+    def theme_mode(data):
+        mode = (data or {}).get("thememode") if data else load_settings().get("thememode")
+        return mode or "SYSTEM"
+
+    # i testi passano da views.i18n al momento
+    # dell'invio; qui la lingua va alla pagina (attributo lang, testi dei file .js).
+    # Cambiando lingua la pagina si ricarica, così anche barra e menu sono tradotti.
+    @app.callback(
+        Output("store-lang", "data"),
+        Input("store-settings", "data"),
+    )
+    def ui_language(data):
+        from views.i18n import JS_TEXTS, set_lang, tr
+        code = (data or {}).get("language") if data else load_settings().get("language")
+        code = code or "it"
+        set_lang(code)
+        return {"code": code, "texts": {k: tr(k, code) for k in JS_TEXTS}}
+
+    app.clientside_callback(
+        """
+        function(lang) {
+            if (!lang) { return window.dash_clientside.no_update; }
+            window.TV_TEXT = lang.texts || {};
+            document.documentElement.setAttribute('lang', lang.code);
+            if (window._tvLang && window._tvLang !== lang.code) {
+                window.location.reload();
+            }
+            window._tvLang = lang.code;
+            return lang.code;
+        }
+        """,
+        Output("lang-sink", "children"),
+        Input("store-lang", "data"),
+    )
+
+    # Il tema si applica nel browser (attributo data-theme di <html>); con "Sistema"
+    # segue prefers-color-scheme anche quando cambia mentre l'app è aperta.
+    app.clientside_callback(
+        """
+        function(mode) {
+            var root = document.documentElement;
+            var mq = window.matchMedia('(prefers-color-scheme: dark)');
+            function apply() {
+                var m = window._tvThemeMode || 'SYSTEM';
+                var dark = m === 'DARK' || (m === 'SYSTEM' && mq.matches);
+                root.setAttribute('data-theme', dark ? 'dark' : 'light');
+                root.setAttribute('data-bs-theme', dark ? 'dark' : 'light');
+            }
+            window._tvThemeMode = mode || 'SYSTEM';
+            if (!window._tvThemeListen) {
+                window._tvThemeListen = true;
+                mq.addEventListener('change', apply);
+            }
+            apply();
+            return window._tvThemeMode;
+        }
+        """,
+        Output("theme-sink", "children"),
+        Input("store-theme", "data"),
+    )
 
     @app.callback(
         Output({"type": "setting-state", "key": MATCH}, "children"),

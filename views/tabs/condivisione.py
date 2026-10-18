@@ -126,6 +126,22 @@ def _provider_card(name: str, authenticated: bool, note: str = "") -> html.Div:
     })
 
 
+def _pending_note():
+    """Invii cloud non riusciti, ritentati all'avvio e prima del prossimo invio."""
+    try:
+        from services.cloud_service import pending_uploads
+        pending = pending_uploads()
+    except Exception:
+        pending = []
+    if not pending:
+        return html.Div()
+    return html.Div([html.Div(f"In coda: {len(pending)} invii da ritentare",
+                              style={"fontWeight": "700"}),
+                     html.Div(", ".join(pending), style={"fontSize": "0.78rem"})],
+                    style={"fontSize": "0.84rem", "color": C["warning"],
+                           "marginBottom": "12px"})
+
+
 def render(cd=None) -> html.Div:
     """
     Costruisce la tab Condivisione completa.
@@ -256,6 +272,7 @@ def render(cd=None) -> html.Div:
                    "padding": "10px 14px",
                    "borderLeft": f"3px solid {C['riposo']}"},   # bordo verde-azzurro
         ),
+        _pending_note(),
 
         # ── Riga 3 card provider affiancate ──────────────────────────────────
         dbc.Row([

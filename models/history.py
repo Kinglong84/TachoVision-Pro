@@ -7,7 +7,7 @@ Infrazioni, Pianificazione e ottimizzazione dei riposi non guardano solo il file
 aperto: si aggiungono i dati più vecchi presi dagli altri scarichi dello
 stesso conducente in archivio.
 
-Unione:
+Unione (C1128ji.b):
   - scarichi della stessa persona = stessi primi 14 caratteri della carta (carta
     rinnovata/sostituita) oppure stesso nome, cognome e data di nascita;
   - dal più recente al più vecchio, solo quelli scaricati prima del file aperto e
@@ -20,9 +20,9 @@ Unione:
   - "Dati mancanti" (DataGap): se tra l'ultimo record del file vecchio e la prima
     attività/inserimento carta dei dati uniti passa più di 1 minuto, il buco è
     contato come riposo e segnalato come avvertenza;
-  - alla fine si tengono solo gli ultimi 27 mesi.
+  - alla fine si tengono solo gli ultimi 27 mesi (C1128ji.a).
 
-Scarico entro 28 giorni (attivo con l'impostazione "Timestamp della
+Scarico entro 28 giorni (C1082ii.a, attivo con l'impostazione "Timestamp della
 carta"): per ogni scarico della carta degli ultimi 1000 giorni si prende lo scarico
 precedente = il più recente tra la data registrata nella carta (EF_CARD_DOWNLOAD,
 dal 02/01/2017) e lo scarico precedente in archivio; se passano più di 28 giorni
@@ -43,12 +43,12 @@ from typing import List, Optional, Tuple
 log = logging.getLogger(__name__)
 
 _EPOCH = date(1970, 1, 1)
-MERGE_MAX_DAYS = 730  # scarichi più vecchi di 2 anni non si uniscono
-MERGE_MIN_STEP = 4  # giorni minimi tra due scarichi uniti
-KEEP_MONTHS = 27  # storico mantenuto
-GAP_MIN_SECONDS = 60  # buco minimo per "Dati mancanti"
-DL_LOOKBACK = 1000  # scarichi controllati per i 28 giorni
-DL_MIN, DL_MAX = 28, 2190  # 28 < giorni <= 2190
+MERGE_MAX_DAYS = 730          # [C1128ji] scarichi più vecchi di 2 anni non si uniscono
+MERGE_MIN_STEP = 4            # [C1128ji] giorni minimi tra due scarichi uniti
+KEEP_MONTHS = 27              # [C1128ji.a] storico mantenuto
+GAP_MIN_SECONDS = 60          # [C1128ji] buco minimo per "Dati mancanti"
+DL_LOOKBACK = 1000            # [C1082ii] scarichi controllati per i 28 giorni
+DL_MIN, DL_MAX = 28, 2190     # [C1082ii] 28 < giorni <= 2190
 CARD_STAMP_FROM = datetime(2017, 1, 2)
 
 

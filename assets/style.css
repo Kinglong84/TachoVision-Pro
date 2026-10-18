@@ -21,6 +21,14 @@
   --blu:        #1D4F91;   /* blu statale: informazioni */
   --giallo:     #D99A00;   /* giallo cantiere */
   --rosso:      #C1121F;   /* rosso divieto */
+  --guida:      #B3261E;   /* attività guida (grafici legacy) */
+  --ocra:       #B07A00;   /* giallo cantiere scuro: avvisi su carta */
+  --ocra-testo: #8A6100;
+  --su-colore:  #FFFFFF;   /* testo sui fondi colorati (pulsanti, voce attiva) */
+  --disco-1:    #FBFCFA;   /* carta del disco: centro e bordo */
+  --disco-2:    #EEF1EC;
+  --velo-verde: rgba(0, 101, 58, 0.08);
+  --velo-blu:   rgba(29, 79, 145, 0.05);
   --font:       'Overpass', 'Segoe UI', sans-serif;
   --r-panel:    6px;       /* raggio pannelli */
   --r-chip:     3px;       /* raggio elementi piccoli */
@@ -66,7 +74,7 @@ a { color: var(--blu); }
 }
 /* la targhetta "PRO" diventa una piccola targa verde */
 .app-header > div:first-child span:nth-child(3) {
-  background: var(--verde) !important; color: #fff !important;
+  background: var(--verde) !important; color: var(--su-colore) !important;
   border: none !important; border-radius: var(--r-chip) !important;
   letter-spacing: 0.04em !important; font-weight: 800;
 }
@@ -99,11 +107,11 @@ a { color: var(--blu); }
   color: var(--inchiostro); font-family: var(--font); font-size: 0.93rem;
   text-align: left; cursor: pointer;
 }
-.nav-item:hover { background: rgba(0, 101, 58, 0.08); }
+.nav-item:hover { background: var(--velo-verde); }
 /* voce attiva = pannello di un cartello autostradale */
 .nav-item--active, .nav-item--active:hover {
-  background: var(--verde); color: #fff; font-weight: 700;
-  box-shadow: inset 0 0 0 2px var(--verde), inset 0 0 0 3px #fff;
+  background: var(--verde); color: var(--su-colore); font-weight: 700;
+  box-shadow: inset 0 0 0 2px var(--verde), inset 0 0 0 3px var(--su-colore);
 }
 .nav-icon { width: 22px; text-align: center; font-size: 1rem; }
 .nav-label { white-space: nowrap; }
@@ -166,10 +174,10 @@ body.sidebar-collapsed .sidebar-collapse-btn { margin: 8px auto 0; transform: ro
   padding: 8px 10px; border-bottom: 2px solid var(--inchiostro);
 }
 .veh-table tbody td { padding: 8px 10px; border-bottom: 1px solid var(--filetto); color: var(--inchiostro); }
-.veh-table tbody tr:hover td { background: rgba(29, 79, 145, 0.05); }
+.veh-table tbody tr:hover td { background: var(--velo-blu); }
 .vrn-badge {
   display: inline-block; padding: 1px 8px; font-weight: 800;
-  background: #fff; border: 2px solid var(--inchiostro); border-radius: var(--r-chip);
+  background: var(--bianco); border: 2px solid var(--inchiostro); border-radius: var(--r-chip);
   letter-spacing: 0.04em;
 }
 .sev-badge { border-radius: var(--r-chip); }
@@ -250,7 +258,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--verde); width: 15p
   border-radius: 50%;
   background:
     radial-gradient(circle, transparent 0 63%, rgba(35,39,44,.06) 63% 63.4%, transparent 63.4%),
-    radial-gradient(circle, #FBFCFA 0 70%, #EEF1EC 100%);
+    radial-gradient(circle, var(--disco-1) 0 70%, var(--disco-2) 100%);
   box-shadow: 0 0 0 1px var(--filetto), 0 0 0 7px var(--superficie), 0 0 0 8px var(--filetto);
 }
 .disc-figure .js-plotly-plot, .disc-figure .dash-graph { position: relative; z-index: 1; }
@@ -261,7 +269,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--verde); width: 15p
   letter-spacing: -0.03em; margin: 0 0 10px;
 }
 .disc-verdict--ok    { color: var(--verde); }
-.disc-verdict--warn  { color: #8A6100; }
+.disc-verdict--warn  { color: var(--ocra-testo); }
 .disc-verdict--bad   { color: var(--rosso); }
 .disc-lead { font-size: 1.05rem; max-width: 46ch; margin-bottom: 18px; }
 .disc-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px 22px; }
@@ -300,3 +308,83 @@ input[type=checkbox], input[type=radio] { accent-color: var(--verde); width: 15p
   .nav-item { width: auto; }
   .main-content > div:last-child { padding: 14px 12px !important; }
 }
+
+
+/* ── Tema scuro ───────────────────────────────────────────────────────────────
+   [Impostazioni → Tema chiaro/scuro] Il disco di notte: carta antracite, inchiostro
+   chiaro, colori della segnaletica schiariti quanto basta per restare leggibili.
+   Il tema è scelto dall'attributo data-theme di <html> (Chiaro, Scuro, Sistema). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* variabili dei componenti Dash (menu, calendari, scelte) */
+  --Dash-Fill-Inverse-Strong: #252A2F;
+  --Dash-Fill-Interactive-Weak: rgba(122, 167, 230, 0.08);
+  --Dash-Fill-Interactive-Strong: #3FAE72;
+  --Dash-Fill-Disabled: rgba(255, 255, 255, 0.08);
+  --Dash-Fill-Primary-Hover: rgba(255, 255, 255, 0.05);
+  --Dash-Fill-Primary-Active: rgba(255, 255, 255, 0.10);
+  --Dash-Text-Strong: #E4E7E2;
+  --Dash-Text-Primary: #E4E7E2;
+  --Dash-Text-Weak: #A3ABB1;
+  --Dash-Text-Disabled: #7C858C;
+  --Dash-Stroke-Weak: #3A4148;
+  --Dash-Stroke-Strong: #58616A;
+  --Dash-Shading-Weak: rgba(0, 0, 0, 0.4);
+  --Dash-Shading-Strong: rgba(0, 0, 0, 0.6);
+  --carta:      #15181B;
+  --carta-2:    #1B1F23;
+  --superficie: #1E2226;
+  --bianco:     #252A2F;
+  --filetto:    #3A4148;
+  --inchiostro: #E4E7E2;
+  --grigio:     #A3ABB1;
+  --verde:      #3FAE72;
+  --verde-2:    #2E8E5A;
+  --blu:        #7AA7E6;
+  --giallo:     #E8B23A;
+  --rosso:      #F0625B;
+  --guida:      #E8746B;
+  --ocra:       #D9A53A;
+  --ocra-testo: #E8B23A;
+  --su-colore:  #0F1214;
+  --disco-1:    #23282D;
+  --disco-2:    #1A1E22;
+  --velo-verde: rgba(63, 174, 114, 0.14);
+  --velo-blu:   rgba(122, 167, 230, 0.10);
+}
+
+/* I grafici Plotly hanno i colori della palette chiara scritti nell'SVG:
+   nel tema scuro testo, griglie e fondi vengono ridipinti con le variabili. */
+:root[data-theme="dark"] .js-plotly-plot [style*="fill: rgb(35, 39, 44)"]   { fill: var(--inchiostro) !important; }
+:root[data-theme="dark"] .js-plotly-plot [style*="fill: rgb(94, 102, 109)"] { fill: var(--grigio) !important; }
+:root[data-theme="dark"] .js-plotly-plot [style*="stroke: rgb(201, 207, 199)"] { stroke: var(--filetto) !important; }
+:root[data-theme="dark"] .js-plotly-plot [style*="stroke: rgb(35, 39, 44)"] { stroke: var(--inchiostro) !important; }
+:root[data-theme="dark"] .js-plotly-plot [style*="fill: rgb(255, 255, 255)"],
+:root[data-theme="dark"] .js-plotly-plot [style*="fill: rgb(246, 247, 244)"],
+:root[data-theme="dark"] .js-plotly-plot [style*="fill: rgb(232, 235, 230)"] { fill: var(--bianco) !important; }
+:root[data-theme="dark"] .js-plotly-plot .hoverlayer text { fill: var(--inchiostro) !important; }
+:root[data-theme="dark"] .js-plotly-plot .hoverlayer .hovertext path { fill: var(--bianco) !important; stroke: var(--filetto) !important; }
+:root[data-theme="dark"] .js-plotly-plot .modebar-btn path { fill: var(--grigio) !important; }
+:root[data-theme="dark"] .js-plotly-plot .modebar { background: transparent !important; }
+
+/* Componenti di terze parti (menu a tendina, calendari, tabelle) */
+:root[data-theme="dark"] .Select-control,
+:root[data-theme="dark"] .Select-menu-outer,
+:root[data-theme="dark"] .Select-option { background: var(--bianco) !important; color: var(--inchiostro) !important; }
+:root[data-theme="dark"] .Select-value-label,
+:root[data-theme="dark"] .Select-placeholder { color: var(--inchiostro) !important; }
+:root[data-theme="dark"] .DateInput, :root[data-theme="dark"] .DateInput_input,
+:root[data-theme="dark"] .DateRangePickerInput, :root[data-theme="dark"] .SingleDatePickerInput,
+:root[data-theme="dark"] .CalendarMonth, :root[data-theme="dark"] .CalendarMonthGrid,
+:root[data-theme="dark"] .DayPicker, :root[data-theme="dark"] .DayPicker_transitionContainer,
+:root[data-theme="dark"] .CalendarDay__default { background: var(--bianco) !important; color: var(--inchiostro) !important; }
+:root[data-theme="dark"] .CalendarMonth_caption { color: var(--inchiostro) !important; }
+:root[data-theme="dark"] .dash-spreadsheet td, :root[data-theme="dark"] .dash-spreadsheet th { color: var(--inchiostro) !important; }
+:root[data-theme="dark"] select, :root[data-theme="dark"] textarea { background: var(--bianco); color: var(--inchiostro); border-color: var(--filetto); }
+:root[data-theme="dark"] .js-plotly-plot [style*="fill: rgb(29, 79, 145)"] { fill: var(--blu) !important; }
+:root[data-theme="dark"] .dash-datepicker { background: var(--bianco) !important; }
+:root[data-theme="dark"] .dash-dropdown,
+:root[data-theme="dark"] .dash-dropdown-trigger,
+:root[data-theme="dark"] .dash-dropdown-content,
+:root[data-theme="dark"] .dash-dropdown-option { background: var(--bianco); color: var(--inchiostro); border-color: var(--filetto); }
+:root[data-theme="dark"] .leaflet-tile-pane { filter: brightness(.8) contrast(1.1); }

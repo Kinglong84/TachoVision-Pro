@@ -18,6 +18,7 @@ Funzioni "Accessori" delle impostazioni.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -94,3 +95,22 @@ def auto_send(cd, raw_bytes: bytes, filename: str) -> Optional[str]:
     paths = save_attachments_to_temp([(filename, raw_bytes)])
     ok, msg = open_mail_client([s.email], subject, body, paths)
     return msg if ok else f"Invio automatico non riuscito: {msg}"
+
+
+# ── Cartella di salvataggio ──────────────────────────────────────────────────────
+def copy_to_save_folder(filename: str, raw_bytes: bytes) -> Optional[Path]:
+    """Copia lo scarico nella cartella scelta nelle impostazioni (es. Download o una
+    chiavetta USB). Vuota = nessuna copia. Un errore non blocca mai la lettura."""
+    from models.settings import load_settings
+    folder = (load_settings().get("savefolder") or "").strip()
+    if not folder:
+        return None
+    try:
+        target = Path(os.path.expandvars(os.path.expanduser(folder)))
+        target.mkdir(parents=True, exist_ok=True)
+        path = target / filename
+        path.write_bytes(raw_bytes)
+        return path
+    except OSError as e:
+        logging.getLogger(__name__).warning("Copia nella cartella di salvataggio non riuscita: %s", e)
+        return None

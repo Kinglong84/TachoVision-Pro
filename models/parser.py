@@ -308,6 +308,25 @@ def _str(b: bytes) -> str:
     except Exception:
         return ""
 
+# CodePage dei campi Name (Reg. 2016/799 App. 1 "Name"): numero della parte di
+# ISO/IEC 8859 usata per il testo; 80 = KOI8-R, 85 = KOI8-U. 0/sconosciuto → latin-1.
+_CODEPAGES = {i: f"iso8859_{i}" for i in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16)}
+_CODEPAGES.update({80: "koi8_r", 85: "koi8_u"})
+
+
+def _name(b: bytes) -> str:
+    """Campo Name: [codePage:1][testo]. Decodifica con la code page dichiarata dalla
+    carta (nomi polacchi, cechi, greci, bulgari, lituani…), padding 0xFF/0x00 tolto."""
+    if not b:
+        return ""
+    text = b[1:].rstrip(b"\xff\x00 ")
+    try:
+        s = text.decode(_CODEPAGES.get(b[0], "latin-1"))
+    except (LookupError, UnicodeDecodeError):
+        s = text.decode("latin-1", errors="replace")
+    return "".join(c for c in s if c.isprintable()).strip()
+
+
 def _bcd_date(b: bytes) -> str:
     """
     Decodifica 4 byte in formato BCD (Binary-Coded Decimal) YYYYMMDD → stringa gg/mm/aaaa.
@@ -425,7 +444,7 @@ def _decode_identification(data: bytes) -> DriverInfo:
     d.issuing_nation = EU_NATIONS.get(nation_b[0] if nation_b else 0, "")  # NationNumeric → ISO alpha-2
     d.card_number       = _str(rd(16))   # 16 byte: numero carta (es. "I000000000000000")
     auth                = rd(36)          # 36 byte: authority; byte[0] = codepage, [1:] = testo
-    d.issuing_authority = _str(auth[1:]) if len(auth) > 1 else ""
+    d.issuing_authority = _name(auth)
 
     # Tre date consecutive a 4 byte ciascuna: emissione, inizio validità, scadenza.
     # setattr(d, attr, val) è equivalente a "d.attr = val" ma con nome dinamico,
@@ -435,8 +454,8 @@ def _decode_identification(data: bytes) -> DriverInfo:
         setattr(d, attr, ts.strftime("%d/%m/%Y") if ts else "")
 
     # Nome e cognome: 36 byte ciascuno, byte[0] = codepage (skippato), byte[1:] = testo
-    sn = rd(36); d.surname   = _str(sn[1:]) if len(sn)>1 else _str(sn)
-    fn = rd(36); d.firstname = _str(fn[1:]) if len(fn)>1 else _str(fn)
+    d.surname   = _name(rd(36))
+    d.firstname = _name(rd(36))
     d.birth_date = _bcd_date(rd(4))   # 4 byte BCD YYYYMMDD (vedi _bcd_date)
     d.language   = _str(rd(2))        # 2 caratteri ISO 639-1 (es. "IT", "DE")
     return d
@@ -454,7 +473,8 @@ def _make_change(aci: int, minute: int, activity: str) -> ActivityChange:
     return ActivityChange(time=minute, activity=activity,
                           manual=c and not inserted,
                           crew=c and inserted,
-                          card_inserted=inserted)
+                          card_inserted=inserted,
+                          slot2=bool((aci >> 15) & 1))
 
 
 def _decode_activities_gen1(data: bytes) -> List[DayActivity]:
@@ -541,7 +561,8 @@ def _decode_activities_gen1(data: bytes) -> List[DayActivity]:
             # ── Decodifica ACI ─────────────────────────────
             # Gli ACI sono parole da 2 byte che codificano un cambio di attività.
             # Layout BIT dell'ACI (16 bit, big-endian):
-            #   bit 15    → slot: 1 = co-conducente (codriver), skip
+            #   bit 15    → slot: 1 = carta nello slot del secondo conducente; le attività
+            #               sono comunque del titolare e vanno contate
             #   bit 14    → inserimento manuale (1 = il conducente ha corretto manualmente)
             #   bit 13    → spare (riservato, non usato)
             #   bit 12-11 → activity code (0=Riposo, 1=Disponibilità, 2=Lavoro, 3=Guida)
@@ -553,8 +574,6 @@ def _decode_activities_gen1(data: bytes) -> List[DayActivity]:
             ai = o + 12   # gli ACI iniziano subito dopo i 12 byte di header del record
             while ai + 2 <= o + rec:
                 aci = _u16(linear, ai); ai += 2
-                if (aci >> 15) & 1:
-                    continue   # bit 15 = 1: co-conducente, ignora
                 m = aci & 0x7FF         # bit 10-0: minuti dall'inizio giornata (11 bit)
                 if m < 1440:            # 1440 = 24*60: scarta valori impossibili
                     changes.append(_make_change(aci, m, ACTIVITY_MAP[(aci >> 11) & 3]))
@@ -667,8 +686,6 @@ def _decode_activities_v2(data: bytes) -> List[DayActivity]:
         o = p1 + 12   # gli ACI iniziano 12 byte dopo il primo timestamp
         while o + 2 <= next_p:
             aci = _u16(buf, o); o += 2
-            if (aci >> 15) & 1:
-                continue   # bit 15 = co-conducente: skip
             m = aci & 0x7FF        # bit 10-0: minuti dall'inizio giornata
             at = (aci >> 11) & 3   # bit 12-11: codice attività
             if m < 1440:
@@ -893,22 +910,24 @@ def _scan_vehicles_structured(raw: bytes) -> List[Vehicle]:
             for vrn, (f, l) in vehicles.items()]
 
 
+def _geo_degrees(val: int) -> float:
+    """GeoCoordinates della norma: intero con segno nel formato ±GGGMM.M
+    (gradi × 1000 + decimi di minuto). Es. 41065 = 41°06,5' = 41,1083°."""
+    a = abs(val)
+    deg = a // 1000 + (a % 1000) / 600.0
+    return round(-deg if val < 0 else deg, 6)
+
+
 def _decode_geocoord(b: bytes) -> Optional[float]:
     """
-    Decodifica 3 byte GeoCoordinate (EU Annex 1B, formato EF_PLACES) in gradi decimali.
+    Decodifica 3 byte GeoCoordinates (luoghi con posizione GNSS) in gradi decimali.
 
-    FORMATO BINARIO:
-    La spec EU usa un intero a 24 bit con segno (complemento a due) dove l'unità
-    è 1/10 di minuto d'arco (non gradi decimali, non secondi d'arco).
+    FORMATO BINARIO: intero a 24 bit con segno (complemento a due) nel formato
+    ±GGGMM.M della norma: le ultime tre cifre sono i minuti in decimi.
+      Esempio: 41065 → 41° 06,5' → 41,1083° (Bari)
 
-    CONVERSIONE: decimal_degrees = value / 10 / 60 = value / 600
-      Esempio: value = 27738 → 27738/600 = 46.23° (nord Italia)
-
-    ESTENSIONE SEGNO A 32 BIT:
-    Python non ha tipi a 24 bit. Per interpretare correttamente il segno (bit 23):
-      - Se bit 7 del primo byte è 1 (numero negativo): riempi il byte alto con 0xFF
-      - Altrimenti: riempi con 0x00
-    Poi converti i 4 byte in int con signed=True.
+    ESTENSIONE SEGNO A 32 BIT: se il bit 7 del primo byte è 1 (negativo) il byte
+    alto è 0xFF, altrimenti 0x00; poi int con signed=True.
     """
     if len(b) < 3:
         return None
@@ -917,7 +936,9 @@ def _decode_geocoord(b: bytes) -> Optional[float]:
     val = int.from_bytes(bytes([fill, b[0], b[1], b[2]]), "big", signed=True)
     if val == 0:
         return None   # coordinate 0,0 = dato mancante (in mezzo all'oceano)
-    coord = round(val / 600.0, 6)   # 6 decimali = precisione ~0.11 metri al quatore
+    if abs(val) % 1000 > 600:
+        return None   # minuti > 60: non è una coordinata (60,0 lo scrive qualche apparecchio)
+    coord = _geo_degrees(val)
     if abs(coord) > 180:
         return None   # coordinata impossibile: falso positivo
     return coord
@@ -925,28 +946,13 @@ def _decode_geocoord(b: bytes) -> Optional[float]:
 
 def _decode_gnss_coord(b: bytes) -> Optional[float]:
     """
-    Decodifica 3 byte GnssCoordinate (EU Annex 1C, formato Gen2 GNSS) in gradi decimali.
+    Decodifica 3 byte di coordinata dei punti GNSS di guida accumulata.
 
-    DIVERSO da _decode_geocoord: l'unità qui è milligradi (1/1000 di grado),
-    NON decimi di minuto d'arco come in EF_PLACES.
-
-    CONVERSIONE: decimal_degrees = value / 1000
-      Esempio: value = 46230 → 46.230° (stesso punto del esempio sopra, formato diverso)
-
-    La spec Gen2 ha scelto milligradi per semplificare la conversione: non serve
-    la divisione per 60 come nel formato vecchio.
-    Stessa tecnica di estensione segno a 32 bit di _decode_geocoord.
+    Stesso tipo GeoCoordinates dei luoghi (±GGGMM.M), quindi stessa conversione.
+    In passato veniva letta come millesimi di grado (41065 → 41,065°): il punto
+    finiva spostato di decine di km (con i minuti presi per decimali).
     """
-    if len(b) < 3:
-        return None
-    fill = 0xFF if (b[0] & 0x80) else 0x00
-    val = int.from_bytes(bytes([fill, b[0], b[1], b[2]]), "big", signed=True)
-    if val == 0:
-        return None
-    coord = round(val / 1000.0, 6)
-    if abs(coord) > 180:
-        return None
-    return coord
+    return _decode_geocoord(b)
 
 
 def _decode_gnss_accumulated(data: bytes) -> List[GNSSRecord]:
@@ -963,8 +969,8 @@ def _decode_gnss_accumulated(data: bytes) -> List[GNSSRecord]:
         offset 0-3:  gnss_ts (4 byte Unix UTC) → timestamp lettura GPS
         offset 4-7:  trip_ts (4 byte Unix UTC) → timestamp sessione (non usato)
         offset 8:    gnss_status (1 byte)       → 0 o 255 = posizione non disponibile
-        offset 9-11: lat (3 byte, milligradi)   → latitudine (vedere _decode_gnss_coord)
-        offset 12-14: lon (3 byte, milligradi)  → longitudine
+        offset 9-11: lat (3 byte, ±GGGMM.M)    → latitudine (vedere _decode_geocoord)
+        offset 12-14: lon (3 byte, ±GGGMM.M)   → longitudine
         offset 15-17: odometer (3 byte, big-endian, km)
 
     VALIDAZIONE strutturale:
@@ -1039,8 +1045,8 @@ def _decode_places(data: bytes, is_gen2: bool = False) -> List[Place]:
     STRUTTURA RECORD GEN2 (21 byte = Gen1 + GNSSPlaceRecord):
       offset 10-13: gnss_ts (4 byte UTC)     → timestamp fix GPS (separato dal record)
       offset 14:    gnss_accuracy (1 byte)   → 0/255 = no fix
-      offset 15-17: gnss_lat (3 byte, milligradi)
-      offset 18-20: gnss_lon (3 byte, milligradi)
+      offset 15-17: gnss_lat (3 byte, ±GGGMM.M)
+      offset 18-20: gnss_lon (3 byte, ±GGGMM.M)
 
     NOTA: molte carte Gen2 v1 scrivono EF_PLACES in formato Gen1 per retrocompatibilità,
     quindi is_gen2=True non implica necessariamente il formato a 21 byte.
@@ -1091,7 +1097,7 @@ def _decode_places(data: bytes, is_gen2: bool = False) -> List[Place]:
         if use_gnss:
             gnss_acc = data[o + 14]   # accuracy: 0 o 255 = no fix GPS
             if gnss_acc not in (0, 255):
-                # Coordinate nel formato EF_PLACES: decimi di minuto d'arco (non milligradi)
+                # Coordinate GeoCoordinates ±GGGMM.M (gradi e minuti in decimi)
                 gnss_lat = _decode_geocoord(data[o + 15: o + 18])
                 gnss_lon = _decode_geocoord(data[o + 18: o + 21])
 
@@ -1291,13 +1297,130 @@ def _decode_licence(data: bytes, driver: DriverInfo) -> None:
     In Python tutti gli oggetti mutabili sono passati per riferimento: la modifica
     dentro la funzione è visibile fuori (a differenza dei tipi primitivi come int/str).
     """
-    if len(data) >= 36: driver.licence_authority = _str(data[1:36])   # byte 1..35 (skip nation a 0)
+    # byte 0..35 = autorità (Name: code page + 35 caratteri), 36 = nazione, 37..52 = numero
+    if len(data) >= 36: driver.licence_authority = _name(data[0:36])
     if len(data) >= 53: driver.licence_number    = _str(data[37:53])  # byte 37..52 (skip separatore a 36)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
+
+# OperationType (Gen2 v2): 1 carico, 2 scarico, 3 carico/scarico contemporaneo
+LOAD_OPERATIONS = {1: "Carico merce", 2: "Scarico merce", 3: "Carico e scarico merce"}
+
+
+def _gnss_place_auth(data: bytes, o: int) -> Tuple[Optional[datetime], Optional[float], Optional[float]]:
+    """GNSSPlaceAuthRecord (12 byte): ora(4) precisione(1) coordinate(6) autenticazione(1)."""
+    ts = _ts(data, o)
+    lat = lon = None
+    if data[o + 4] not in (0, 255):
+        lat = _decode_geocoord(data[o + 5: o + 8])
+        lon = _decode_geocoord(data[o + 8: o + 11])
+    return ts, lat, lon
+
+
+def _decode_border_crossings(data: bytes) -> List[dict]:
+    """EF Border_Crossings (0528, carte Gen2 v2): [puntatore:2] + record da 17 byte
+    paese lasciato(1) paese entrato(1) GNSSPlaceAuthRecord(12) odometro(3)."""
+    out = []
+    for o in range(2, len(data) - 16, 17):
+        ts, lat, lon = _gnss_place_auth(data, o + 2)
+        if ts is None or not (YEAR_MIN <= ts.year <= YEAR_MAX):
+            continue
+        out.append({"datetime": ts.strftime("%d/%m/%Y %H:%M"), "date": ts.strftime("%Y-%m-%d"),
+                    "ts_utc": int(ts.timestamp()),
+                    "country_left": EU_NATIONS.get(data[o], f"?{data[o]}"),
+                    "country_entered": EU_NATIONS.get(data[o + 1], f"?{data[o + 1]}"),
+                    "lat": lat, "lon": lon,
+                    "odometer_km": int.from_bytes(data[o + 14: o + 17], "big")})
+    return sorted(out, key=lambda r: r["ts_utc"], reverse=True)
+
+
+def _decode_load_unload(data: bytes) -> List[dict]:
+    """EF Load_Unload_Operations (0529, carte Gen2 v2): [puntatore:2] + record da 20 byte
+    ora(4) tipo operazione(1) GNSSPlaceAuthRecord(12) odometro(3)."""
+    out = []
+    for o in range(2, len(data) - 19, 20):
+        ts = _ts(data, o)
+        if ts is None or not (YEAR_MIN <= ts.year <= YEAR_MAX):
+            continue
+        _, lat, lon = _gnss_place_auth(data, o + 5)
+        out.append({"datetime": ts.strftime("%d/%m/%Y %H:%M"), "date": ts.strftime("%Y-%m-%d"),
+                    "ts_utc": int(ts.timestamp()),
+                    "operation": LOAD_OPERATIONS.get(data[o + 4], f"Tipo {data[o + 4]}"),
+                    "lat": lat, "lon": lon,
+                    "odometer_km": int.from_bytes(data[o + 17: o + 20], "big")})
+    return sorted(out, key=lambda r: r["ts_utc"], reverse=True)
+
+
+def _split_sections(raw: bytes) -> Dict[int, Dict[int, bytes]]:
+    """Cammina il file come sequenza TLV [fid][appendice][lunghezza]: {appendice: {fid: dati}}.
+    Ritorna {} se il file non è una sequenza TLV completa (file non standard)."""
+    out: Dict[int, Dict[int, bytes]] = {}
+    o, n = 0, len(raw)
+    while o + 5 <= n:
+        fid, cf, ln = (raw[o] << 8) | raw[o + 1], raw[o + 2], (raw[o + 3] << 8) | raw[o + 4]
+        if cf > 3 or o + 5 + ln > n:
+            return {}
+        out.setdefault(cf, {})[fid] = raw[o + 5: o + 5 + ln]
+        o += 5 + ln
+    return out if o == n else {}
+
+
+def _merge_gen2_section(cd: CardData, sections: Dict[int, Dict[int, bytes]]) -> None:
+    """Unisce i dati della sezione Gen2 (appendice 02) a quelli già letti dalla Gen1."""
+    g2 = sections.get(2, {})
+    if EF_APPLICATION_IDENTIFICATION not in g2:
+        return
+    cd.driver.generation = "G2 (v2)" if EF_APPLICATION_ID_V2 in g2 else "G2 (v1)"
+
+    if EF_PLACES in g2:
+        merged = {(p.ts_utc // 60, p.country): p for p in cd.places}
+        for p in _decode_places(g2[EF_PLACES], is_gen2=True):
+            merged[(p.ts_utc // 60, p.country)] = p          # Gen2: ha il GNSS
+        cd.places = sorted(merged.values(), key=lambda p: (p.date, p.datetime[11:]),
+                           reverse=True)
+
+    if EF_VEHICLES_USED in g2:
+        veh2, sess2 = _decode_vehicles_tlv(g2[EF_VEHICLES_USED], prefer_gen2=True)
+        sessions = {(s.vrn, s.first_use_utc): s for s in cd.vehicle_sessions}
+        for s in sess2:
+            sessions.setdefault((s.vrn, s.first_use_utc), s)
+        cd.vehicle_sessions = sorted(sessions.values(), key=lambda s: s.first_use_utc)
+        vin = {v.vrn: v.vin for v in list(cd.vehicles) + veh2 if v.vin}
+        by_vrn: Dict[str, List[VehicleSession]] = {}
+        for s in cd.vehicle_sessions:
+            by_vrn.setdefault(s.vrn, []).append(s)
+        cd.vehicles = []
+        for vrn, ss in by_vrn.items():
+            first = min(ss, key=lambda s: s.first_use_utc)
+            last = max(ss, key=lambda s: s.last_use_utc)
+            cd.vehicles.append(Vehicle(vrn=vrn, first_use=first.first_use,
+                                       last_use=last.last_use, vin=vin.get(vrn, ""),
+                                       total_km=sum(s.km for s in ss if s.km > 0)))
+
+    def _union(old, new, key):
+        seen = {key(x) for x in old}
+        return old + [x for x in new if key(x) not in seen]
+
+    if EF_BORDER_CROSSINGS in g2:
+        cd.border_crossings = _decode_border_crossings(g2[EF_BORDER_CROSSINGS])
+    if EF_LOAD_UNLOAD_OPERATIONS in g2:
+        cd.load_unload = _decode_load_unload(g2[EF_LOAD_UNLOAD_OPERATIONS])
+
+    if EF_EVENTS_DATA in g2:
+        cd.events = _union(cd.events, _decode_events(g2[EF_EVENTS_DATA], is_gen2=True),
+                           lambda e: (e.begin_time, e.event_type_code))
+    if EF_FAULTS_DATA in g2:
+        cd.faults = _union(cd.faults, _decode_faults(g2[EF_FAULTS_DATA], is_gen2=True),
+                           lambda f: (f.begin_time, f.fault_type_code))
+    if EF_SPECIFIC_CONDITIONS in g2:
+        cd.specific_conditions = _union(
+            cd.specific_conditions,
+            _decode_specific_conditions(g2[EF_SPECIFIC_CONDITIONS], is_gen2=True),
+            lambda c: (c.entry_time, c.condition_type))
+
 
 def parse_ddd(raw: bytes) -> CardData:
     """
@@ -1471,6 +1594,17 @@ def parse_ddd(raw: bytes) -> CardData:
             cd.specific_conditions = _decode_specific_conditions(S[EF_SPECIFIC_CONDITIONS], is_gen2=is_gen2)
         except Exception as e:
             cd.errors.append(f"SPECIFIC_CONDITIONS: {e}")
+
+    # ── Sezione Gen2 della carta (blocchi con appendice 02) ─────────────────────
+    # Le carte Gen2 hanno due applicazioni: la Gen1 (appendice 00) la scrivono tutti
+    # i tachigrafi, la Gen2 (appendice 02) solo quelli di seconda generazione, con il
+    # GNSS nei luoghi e il VIN dei veicoli. Le due sezioni si completano: la Gen1 ha
+    # i luoghi recenti dei veicoli vecchi, la Gen2 conserva luoghi più vecchi (buffer
+    # più lungo nel tempo). Si uniscono, preferendo il record Gen2 a parità di istante.
+    try:
+        _merge_gen2_section(cd, _split_sections(raw))
+    except Exception as e:
+        cd.errors.append(f"GEN2: {e}")
 
     # Dimensione file originale in byte (utile per diagnostica e debug)
     cd.driver.file_size = str(len(raw))

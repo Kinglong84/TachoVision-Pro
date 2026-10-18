@@ -29,6 +29,46 @@ METADATA_FILE = ".tachovision_index.json"
 
 
 # ── Struttura metadati ────────────────────────────────────────────────────────
+# ── Nome del file di scarico ──────────────────────────────────────────────────────
+# Un solo costruttore, come i lettori ufficiali: C_aaaaMMgg_HHmm_I_COGNOME_CARTA.ext
+# (ora UTC dello scarico, iniziale del nome, cognome solo A-Z/0-9, numero carta).
+_TRANSLIT = str.maketrans({
+    "Ł": "L", "Đ": "D", "Ø": "O", "Æ": "AE", "Œ": "OE", "Þ": "TH", "ß": "SS", "Ħ": "H",
+    "А": "A", "Б": "B", "В": "V", "Г": "G", "Д": "D", "Е": "E", "Ё": "E", "Ж": "ZH",
+    "З": "Z", "И": "I", "Й": "Y", "К": "K", "Л": "L", "М": "M", "Н": "N", "О": "O",
+    "П": "P", "Р": "R", "С": "S", "Т": "T", "У": "U", "Ф": "F", "Х": "KH", "Ц": "TS",
+    "Ч": "CH", "Ш": "SH", "Щ": "SHCH", "Ъ": "", "Ы": "Y", "Ь": "", "Э": "E", "Ю": "YU",
+    "Я": "YA", "Є": "YE", "І": "I", "Ї": "YI", "Ґ": "G", "Ј": "J", "Љ": "LJ", "Њ": "NJ",
+    "Ћ": "C", "Џ": "DZ", "Ђ": "DJ",
+    "Α": "A", "Β": "V", "Γ": "G", "Δ": "D", "Ε": "E", "Ζ": "Z", "Η": "I", "Θ": "TH",
+    "Ι": "I", "Κ": "K", "Λ": "L", "Μ": "M", "Ν": "N", "Ξ": "X", "Ο": "O", "Π": "P",
+    "Ρ": "R", "Σ": "S", "Τ": "T", "Υ": "Y", "Φ": "F", "Χ": "CH", "Ψ": "PS", "Ω": "O",
+})
+
+
+def name_part(text: str) -> str:
+    """Testo per il nome del file: maiuscolo, senza accenti, spazi → "_", solo A-Z 0-9 _ -."""
+    import re
+    import unicodedata
+    s = (text or "").upper().translate(_TRANSLIT)
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = re.sub(r"\s+", "_", s.strip())
+    return re.sub(r"[^A-Z0-9_-]", "", s)
+
+
+def ddd_filename(driver, when: Optional[datetime] = None, ext: str = ".DDD") -> str:
+    """Nome standard dello scarico. when: ora dello scarico (locale se senza fuso)."""
+    from datetime import timezone
+    when = when or datetime.now()
+    utc = when.astimezone(timezone.utc)
+    initial = name_part(getattr(driver, "firstname", ""))[:1]
+    surname = name_part(getattr(driver, "surname", "")) or "UNKNOWN"
+    card = name_part(getattr(driver, "card_number", "")) or "0000000000000000"
+    middle = f"{initial}_{surname}" if initial else surname
+    return f"C_{utc.strftime('%Y%m%d_%H%M')}_{middle}_{card}{ext}"
+
+
 class ArchiveEntry:
     def __init__(self, **kw):
         self.filename:      str  = kw.get("filename", "")
@@ -172,8 +212,8 @@ class ArchiveService:
         Salva il file .DDD grezzo nella cartella archivio.
         Restituisce un ArchiveEntry con i metadati.
 
-        Il nome file segue la convenzione standard:
-            C_YYYYMMDD_HHMM_<cognome>_<numero_carta>.DDD
+        Il nome file segue la convenzione standard (vedi ddd_filename):
+            C_YYYYMMDD_HHMM_<iniziale>_<cognome>_<numero_carta>.DDD (ora UTC)
         """
         d   = card_data.driver
         # data dello scarico = quella della carta (o del nome file),
@@ -182,17 +222,12 @@ class ArchiveService:
             now = datetime.strptime(d.last_download, "%d/%m/%Y %H:%M")
         except (TypeError, ValueError):
             now = datetime.now()
-        surname  = (d.surname  or "UNKNOWN").replace(" ", "").upper()[:10]
-        card_num = (d.card_number or "0000000000000000").replace(" ", "")[:16]
         # DDD / ESM / TGD / C1B
         from models.settings import load_settings
         ext = {"DDD": ".DDD", "ESM": ".esm", "TGD": ".tgd", "C1B": ".C1B"}.get(
             load_settings().filetype, ".DDD")
 
-        filename = custom_filename or (
-            f"C_{now.strftime('%Y%m%d')}_{now.strftime('%H%M')}"
-            f"_{surname}_{card_num}{ext}"
-        )
+        filename = custom_filename or ddd_filename(d, now, ext)
         filepath = self.archive_dir / filename
 
         # stesso contenuto già in archivio: non si crea una copia con data nuova
@@ -214,7 +249,7 @@ class ArchiveService:
         entry = ArchiveEntry(
             filename=filename,
             filepath=str(filepath),
-            card_number=card_num,
+            card_number=(d.card_number or "0000000000000000").replace(" ", "")[:16],
             driver_name=d.full_name,
             download_date=now.strftime("%d/%m/%Y %H:%M"),
             next_due=next_due,

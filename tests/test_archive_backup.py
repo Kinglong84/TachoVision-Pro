@@ -25,7 +25,10 @@ def test_backup_ripristino_e_cancella(tmp_path, monkeypatch):
     a = ArchiveService(str(tmp_path / "archivio"))
     e1 = a.save_ddd(b"AAA", _cd("I111", "ROSSI"))
     a.save_ddd(b"BBB", _cd("I222", "BIANCHI"))
-    assert e1.filename.startswith("C_20240708_1935_ROSSI_I111")      # data dello scarico
+    # data dello scarico (19:35 locali) scritta in UTC nel nome, come i lettori ufficiali
+    from datetime import datetime, timezone
+    utc = datetime(2024, 7, 8, 19, 35).astimezone(timezone.utc).strftime("%Y%m%d_%H%M")
+    assert e1.filename == f"C_{utc}_ROSSI_I111.DDD"
     md.save_manual("I111", ManualData(notes=[Note(1, "Commento", "long", "x")]))
     st.save_settings(st.Settings({"isbus": True}))
 
