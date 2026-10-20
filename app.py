@@ -289,7 +289,22 @@ if __name__ == "__main__":
     print("  TachoVision Pro  --  architettura MVC")
     print("─" * 60)
     print("  http://localhost:8050")
+    print("─" * 60)
+    print("  Premi INVIO per aprire il programma nel browser")
+    print("  Chiudi questa finestra (o CTRL+C) per fermarlo")
     print("─" * 60 + "\n")
+
+    def _open_browser_on_enter():
+        """INVIO nella finestra del terminale → apre la pagina nel browser."""
+        import webbrowser
+        while True:
+            try:
+                input()
+            except (EOFError, KeyboardInterrupt):
+                return   # nessuna tastiera collegata (es. avvio in background)
+            webbrowser.open("http://localhost:8050")
+
+    threading.Thread(target=_open_browser_on_enter, daemon=True).start()
     # debug=False: non mostrare errori dettagliati nel browser (più sicuro)
     # host="0.0.0.0": accetta connessioni da qualsiasi indirizzo di rete
     # port=8050: porta TCP su cui risponde il server

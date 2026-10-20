@@ -54,10 +54,12 @@ echo.
 echo        Il programma funziona normalmente caricando file .DDD.
 
 :fine
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0crea_collegamento.ps1"
 echo.
 echo ============================================================
 echo   Installazione completata!
-echo   Avvia il programma con:  python app.py
-echo   Poi apri:  http://localhost:8050
+echo   Avvia il programma con il collegamento 'TachoVision Pro'
+echo   sul Desktop (oppure con start_app.bat), poi premi INVIO
+echo   nella finestra per aprirlo nel browser:  http://localhost:8050
 echo ============================================================
 pause

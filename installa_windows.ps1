@@ -58,10 +58,12 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Host ""
+& (Join-Path $PSScriptRoot "crea_collegamento.ps1")
+Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "  Avvia il programma:" -ForegroundColor White
-Write-Host "    python app.py" -ForegroundColor Yellow
-Write-Host "  Poi apri nel browser:" -ForegroundColor White
+Write-Host "  Avvia il programma con il collegamento 'TachoVision Pro'" -ForegroundColor White
+Write-Host "  sul Desktop (oppure start_app.bat), poi premi INVIO nella" -ForegroundColor White
+Write-Host "  sua finestra per aprirlo nel browser:" -ForegroundColor White
 Write-Host "    http://localhost:8050" -ForegroundColor Yellow
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""

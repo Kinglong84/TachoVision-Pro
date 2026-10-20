@@ -131,7 +131,8 @@ Doppio clic su **`installa_windows.bat`** oppure, da PowerShell:
 .\installa_windows.ps1
 ```
 
-Lo script installa automaticamente tutte le dipendenze Python.
+Lo script installa automaticamente tutte le dipendenze Python e crea sul Desktop il
+collegamento **TachoVision Pro** con l'icona del programma.
 
 ### Manuale (Windows / macOS / Linux)
 
@@ -196,7 +197,15 @@ Il programma è accessibile anche dagli altri dispositivi sulla stessa rete loca
 
 ### Avvio rapido su Windows
 
-Doppio clic su **`start_app.bat`**
+Doppio clic sul collegamento **TachoVision Pro** sul Desktop (oppure su **`start_app.bat`**).
+Si apre la finestra del programma: premi **INVIO** per aprire la pagina nel browser,
+anche più volte se chiudi la scheda. Per fermare il programma chiudi la finestra.
+
+Il collegamento si può ricreare in qualsiasi momento con:
+
+```powershell
+.\crea_collegamento.ps1
+```
 
 ---
 
@@ -295,7 +304,8 @@ tachovision-pro/
 ├── app.py                      ← entry point: avvio server + layout
 ├── requirements.txt
 ├── installa_windows.bat / .ps1 ← installazione automatica Windows
-├── start_app.bat               ← avvio rapido Windows
+├── start_app.bat               ← avvio rapido Windows (INVIO apre il browser)
+├── crea_collegamento.ps1       ← collegamento con icona sul Desktop
 ├── models/
 │   ├── parser.py               ← lettore binario .DDD (Gen1 + Gen2)
 │   ├── card_data.py            ← dataclass: CardData, Vehicle, Place…
